@@ -1,9 +1,9 @@
-// Simulator-Verbindungsoptionen (Fehler einbauen) - gemeinsam von Kopfzeile und Simulator-Panel genutzt.
+// Simulator connection options (error injection), shared by the header and the simulator panel.
 import { store } from './store.js';
 
 export const NEUTRAL = { anchor_left_dx: 0, anchor_left_dy: 0, anchor_right_dx: 0, anchor_right_dy: 0, radius: null, scale_left: 1, scale_right: 1, pen_dx: 0, pen_dy: 0 };
 
-/** Nur abweichende Fehlerwerte senden; leer = fehlerfreier Simulator. */
+/** Send only non-neutral error values; empty = error-free simulator. */
 export function perturbBody(p) {
   const out = {};
   for (const [k, neutral] of Object.entries(NEUTRAL)) {
@@ -24,7 +24,7 @@ export function connectBody() {
   }
   if (t === 'wifi') {
     const w = store.get('wifi') || {};
-    const m = /^([^:]+):(\d{1,5})$/.exec((w.host || '').trim());          // "host:port" erlaubt (z. B. Fake-Board 127.0.0.1:2323)
+    const m = /^([^:]+):(\d{1,5})$/.exec((w.host || '').trim());          // "host:port" allowed (e.g. fake board 127.0.0.1:2323)
     const body = { transport: 'wifi', host: m ? m[1] : (w.host || '').trim(), protocol: w.protocol === 'websocket' ? 'websocket' : 'telnet' };
     if (m) body.port = Number(m[2]);
     return body;

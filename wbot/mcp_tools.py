@@ -50,11 +50,11 @@ class Api:
             r = await self.client.request(method, path, **kw)
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadError, httpx.RemoteProtocolError, OSError) as exc:
             raise McpToolError(
-                f"Der W-BOT-Webserver ist nicht erreichbar ({self.label}): {exc.__class__.__name__}. "
-                "Bitte zuerst `python -m wbot serve` starten (oder die richtige Adresse mit --api angeben).",
+                f"The W-BOT web server is not reachable ({self.label}): {exc.__class__.__name__}. "
+                "Please start `python -m wbot serve` first (or give the right address with --api).",
                 "server_down") from None
         except httpx.TimeoutException:
-            raise McpToolError("Zeitüberschreitung bei der Anfrage an den W-BOT-Webserver.", "timeout") from None
+            raise McpToolError("Timed out waiting for the W-BOT web server.", "timeout") from None
         if r.status_code >= 400:
             try:
                 body = r.json()
@@ -92,7 +92,7 @@ async def load_ctx(api: Api) -> Ctx:
     try:
         cfg = Config.model_validate(cfg_json)
     except Exception as exc:  # noqa: BLE001
-        raise McpToolError(f"Konfiguration des Servers nicht lesbar: {exc}", "bad_config") from exc
+        raise McpToolError(f"The server configuration is not readable: {exc}", "bad_config") from exc
     return Ctx(cfg, state)
 
 
@@ -128,14 +128,14 @@ def resolve_color(value: int | str, cfg: Config) -> int:
 
 def check_enabled(ctx: Ctx) -> None:
     if not ctx.mcp.enabled:
-        raise McpToolError("MCP-Steuerung ist in der Konfiguration (mcp.enabled) deaktiviert.", "mcp_disabled")
+        raise McpToolError("MCP control is disabled in the configuration (mcp.enabled).", "mcp_disabled")
 
 
 def check_motion_allowed(ctx: Ctx) -> None:
     check_enabled(ctx)
     if not ctx.mcp.allow_motion:
-        raise McpToolError("Bewegung ist per Konfiguration gesperrt (mcp.allow_motion = false): nur Status, "
-                           "Vorschau und Stopp sind erlaubt. Ein Mensch kann das in config/wbot.yaml ändern.",
+        raise McpToolError("Motion is blocked by the configuration (mcp.allow_motion = false): only status, "
+                           "preview and stop are allowed. A human can change this in config/wbot.yaml.",
                            "motion_disabled")
 
 
@@ -335,7 +335,7 @@ async def plan_and_run(api: Api, ctx: Ctx, drawing: Drawing, opt: DrawOptions, *
     body = {"drawing": d.to_json(), "dry_run": bool(opt.dry_run and not opt.preview_only), "name": opt.name}
     pv = await api.post("/api/preview", body)
     for w in pv.get("warnings", []):
-        if not (outside and "außerhalb des erlaubten Bereichs" in w):
+        if not (outside and "outside the permitted area" in w):
             warnings.append(w)
     pen_xy = tuple(ctx.state["position"]["physical"]) if ctx.state["position"].get("physical") else None
     content: Content = []

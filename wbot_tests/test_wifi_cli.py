@@ -10,8 +10,8 @@ from wbot.wifi_setup import wifi_commands
 def test_wifi_commands_prints_placeholder_never_a_password(capsys):
     assert main(["wifi-commands", "--ssid", "Heimnetz", "--hostname", "wbot"]) == 0
     out = capsys.readouterr().out
-    assert "$Sta/SSID=Heimnetz" in out and "$Sta/Password=<DEIN-WLAN-PASSWORT>" in out
-    assert "wbot.local" in out and "UNVERIFIED" in out and "KEINE Anmeldung" in out
+    assert "$Sta/SSID=Heimnetz" in out and "$Sta/Password=<YOUR-WIFI-PASSWORD>" in out
+    assert "wbot.local" in out and "UNVERIFIED" in out and "NO authentication" in out
     assert "$S" in out and "$Telnet/Enable" in out
 
 
@@ -25,4 +25,4 @@ def test_wifi_commands_rejects_bad_input(ssid, host):
 def test_probe_needs_exactly_one_target(capsys):
     assert main(["probe"]) == 2
     assert main(["probe", "--port", "COM9", "--board-host", "x.local"]) == 2
-    assert "genau eines" in capsys.readouterr().err
+    assert "exactly one of" in capsys.readouterr().err

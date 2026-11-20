@@ -1,12 +1,13 @@
-// Brettansicht (Canvas): maßstabsgetreu, Raster, Lineale, Anker + Riemen, Gondel, Spur, Vorschau, Klick-Ziel.
+// Board view (canvas): true to scale, grid, rulers, motors + belts, gondola, trace, preview, click target.
 import { h, clamp, fmt, lsGet, lsSet, clear } from './util.js';
 import { icon } from './icons.js';
-import { store } from './store.js';
+import { store, viewing } from './store.js';
 import { colorHex } from './widgets.js';
 import { mountTargetPopover } from './board-pop.js';
 import { strokesOf } from './drawing.js';
 import { drawCalibration } from './board-calib.js';
 import { mountBoardCam } from './board-cam.js';
+import { live, mountLiveBar, onLiveInk } from './live.js';
 
 const RL = 42, RB = 24, PAD = 12;                       // Lineal links / unten, Rand
 const NICE = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
@@ -23,7 +24,7 @@ export function pushTrace(seg) {
 export function mountBoard(root) {
   const opts = { grid: true, travel: false, firmware: false, preview: true, ...lsGet('wbot-board', {}) };
   const canvas = h('canvas', { class: 'board-canvas', tabindex: '0', role: 'img',
-    'aria-label': 'Brettansicht. Klick auf einen Punkt wählt ein Ziel.' });
+    'aria-label': 'Board view. Click a point to pick a target.' });
   const readout = h('div', { class: 'board-readout', hidden: true });
   const simChip = h('div', { class: 'board-sim', hidden: true });
   const note = h('div', { class: 'note board-note', hidden: true, role: 'status' });
@@ -33,27 +34,35 @@ export function mountBoard(root) {
   let W = 0, H = 0, dpr = 1, dirty = false, hover = null, th = {};
   const view = { scale: 1, tx: 0, ty: 0, mode: 'all' };
 
-  /* ---------- Werkzeugleiste ---------- */
+  /* ---------- Toolbar ---------- */
   const tog = (key, label, title) => {
     const b = h('button', { class: 'btn sm', type: 'button', 'aria-pressed': String(!!opts[key]), title,
       onClick: () => { opts[key] = !opts[key]; b.setAttribute('aria-pressed', String(opts[key])); lsSet('wbot-board', opts); invalidate(); } }, label);
     return b;
   };
   const vbtn = (label, title, fn, ic) => h('button', { class: 'btn sm' + (ic ? ' icon-only' : ''), type: 'button', title, 'aria-label': title, onClick: fn }, ic ? icon(ic) : label);
+  const clearBtn = h('button', { class: 'btn sm', type: 'button', title: 'Clear the drawn trace from the view', onClick: () => { store.get('trace').length = 0; store.touch('trace'); } }, icon('trash'), 'Clear trace');
+  const menu = h('div', { class: 'board-menu', hidden: true, role: 'group', 'aria-label': 'View options' },
+    tog('grid', 'Grid', 'Show or hide the grid'), tog('preview', 'Preview', 'Show or hide the preview'),
+    tog('travel', 'Travel', 'Show travel moves (pen up)'), tog('firmware', 'Firmware', 'Position the firmware believes'), clearBtn);
+  const menuBtn = h('button', { class: 'btn sm', type: 'button', 'aria-expanded': 'false', title: 'View options',
+    onClick: () => { menu.hidden = !menu.hidden; menuBtn.setAttribute('aria-expanded', String(!menu.hidden)); } }, icon('gear'), 'View');
+  document.addEventListener('pointerdown', (e) => { if (!menu.hidden && !menu.contains(e.target) && !menuBtn.contains(e.target)) { menu.hidden = true; menuBtn.setAttribute('aria-expanded', 'false'); } });
+  const liveBtn = h('button', { class: 'btn sm', type: 'button', 'aria-pressed': 'false', title: 'Draw on the board and let the plotter follow',
+    onClick: () => { live.setOn(!live.on); liveBtn.setAttribute('aria-pressed', String(live.on)); store.set({ target: null }); invalidate(); } }, icon('pen'), 'Live draw');
   const bar = h('div', { class: 'board-bar' },
-    vbtn('Alles', 'Ganze Maschine mit Ankern zeigen', () => fit('all')),
-    vbtn('Brett', 'Auf das Brett zoomen', () => fit('board')),
-    vbtn('', 'Hineinzoomen', () => zoomBy(1.4), 'plus'), vbtn('', 'Herauszoomen', () => zoomBy(1 / 1.4), 'minus'),
-    h('span', { class: 'sp' }),
-    tog('grid', 'Raster', 'Raster ein/aus'), tog('preview', 'Vorschau', 'Testbild-Vorschau ein/aus'),
-    tog('travel', 'Fahrwege', 'Leerfahrten (Stift oben) zeigen'), tog('firmware', 'FW-Position', 'Position, die die Firmware glaubt'),
-    h('button', { class: 'btn sm', type: 'button', title: 'Gezeichnete Spur aus der Ansicht löschen', onClick: () => { store.get('trace').length = 0; store.touch('trace'); } }, icon('trash'), 'Spur löschen'));
+    vbtn('All', 'Show the whole machine including the motors', () => fit('all')),
+    vbtn('Board', 'Zoom to the board', () => fit('board')),
+    vbtn('', 'Zoom in', () => zoomBy(1.4), 'plus'), vbtn('', 'Zoom out', () => zoomBy(1 / 1.4), 'minus'),
+    h('span', { class: 'sp' }), liveBtn, menuBtn, menu);
   const cam = mountBoardCam(bar, () => invalidate(), () => Math.min(1800, Math.max(400, (store.get('config')?.board?.width_mm ?? 1500) * view.scale * dpr)));
-  let ga = 1;                                          // Deckkraft von Vorschau und Spur (Kamera-Überblendung)
+  let ga = 1;                                          // Opacity of preview and trace (camera blend)
   root.append(bar, note, wrap);
   mountTargetPopover(wrap, store, () => ({ w2s, s2w, W, H }));
+  mountLiveBar(wrap);
+  onLiveInk(() => invalidate());
 
-  /* ---------- Theme & Größe ---------- */
+  /* ---------- Theme & size ---------- */
   function readTheme() {
     const cs = getComputedStyle(document.documentElement);
     const v = (n) => cs.getPropertyValue(n).trim();
@@ -114,7 +123,7 @@ export function mountBoard(root) {
     if (!cfg) return;
     ctx.save();
     ctx.beginPath(); ctx.rect(RL, 0, W - RL, H - RB); ctx.clip();
-    drawBoard(cfg); cam.draw(ctx, w2s, view.scale); ga = cam.inkAlpha(); drawPreview(cfg); drawTrace(cfg); ga = 1; drawMachine(cfg); drawCamTrack(); drawCalibration(ctx, w2s, th, store.get('tab') === 'kalib' ? store.get('calib') : null, view, W, RL); drawTarget(); drawHover();
+    drawBoard(cfg); cam.draw(ctx, w2s, view.scale); ga = cam.inkAlpha(); drawPreview(cfg); drawTrace(cfg); drawLive(cfg); ga = 1; drawMachine(cfg); drawCamTrack(); drawCalibration(ctx, w2s, th, viewing('kalib') ? store.get('calib') : null, view, W, RL); drawTarget(); drawHover();
     ctx.restore();
     drawRulers();
   }
@@ -145,6 +154,9 @@ export function mountBoard(root) {
     ctx.setLineDash([]);
   }
 
+  /** On-screen width of a pen's line: the real width in mm, but never thinner than `min` px. */
+  function penPx(cfg, slot, min) { return Math.max(min, (cfg?.colors?.[slot]?.width_mm ?? 0) * view.scale); }
+
   function drawPreview(cfg) {
     const pv = store.get('preview');
     if (!opts.preview || !pv?.drawing) return;
@@ -156,9 +168,9 @@ export function mountBoard(root) {
       if (opts.travel && last) {
         ctx.setLineDash([4, 4]); ctx.strokeStyle = th.belt; ctx.lineWidth = 1; ctx.globalAlpha = .6 * ga;
         ctx.beginPath(); ctx.moveTo(...w2s(...last)); ctx.lineTo(...w2s(...pts[0])); ctx.stroke();
-        ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.lineWidth = 1.4;
+        ctx.setLineDash([]); ctx.globalAlpha = 1;
       }
-      ctx.strokeStyle = colorHex(cfg, s.color); ctx.globalAlpha = .8 * ga;
+      ctx.strokeStyle = colorHex(cfg, s.color); ctx.globalAlpha = .8 * ga; ctx.lineWidth = penPx(cfg, s.color, 1.4);
       ctx.beginPath(); ctx.moveTo(...w2s(...pts[0]));
       for (let i = 1; i < pts.length; i++) ctx.lineTo(...w2s(...pts[i]));
       ctx.stroke(); ctx.globalAlpha = 1;
@@ -178,10 +190,27 @@ export function mountBoard(root) {
       ctx.beginPath(); ctx.moveTo(...w2s(s[0], s[1]));
       let j = i;
       while (j < n && !!segs[j][4] === down && segs[j][5] === c) { ctx.lineTo(...w2s(segs[j][2], segs[j][3])); j++; }
-      if (down) { ctx.strokeStyle = colorHex(cfg, c); ctx.lineWidth = 2.6; ctx.globalAlpha = ga; ctx.setLineDash([]); }
+      if (down) { ctx.strokeStyle = colorHex(cfg, c); ctx.lineWidth = penPx(cfg, c, 2.6); ctx.globalAlpha = ga; ctx.setLineDash([]); }
       else { ctx.strokeStyle = th.belt; ctx.lineWidth = 1; ctx.globalAlpha = .55 * ga; ctx.setLineDash([3, 4]); }
       ctx.stroke();
       i = j;
+    }
+    ctx.globalAlpha = 1; ctx.setLineDash([]);
+  }
+
+  /** Strokes drawn in live mode: solid while drawing/queued, faint once sent (the plotter's own trace takes over). */
+  function drawLive(cfg) {
+    if (!live.strokes.length) return;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    for (const st of live.strokes) {
+      if (st.pts.length < 1) continue;
+      const sent = st.state === 'sent';
+      ctx.strokeStyle = colorHex(cfg, st.color); ctx.lineWidth = penPx(cfg, st.color, 1.6);
+      ctx.globalAlpha = sent ? 0.3 : 0.95; ctx.setLineDash(st.state === 'queued' ? [6, 4] : []);
+      ctx.beginPath(); ctx.moveTo(...w2s(...st.pts[0]));
+      if (st.pts.length === 1) ctx.lineTo(...w2s(st.pts[0][0] + 0.01, st.pts[0][1]));
+      for (let i = 1; i < st.pts.length; i++) ctx.lineTo(...w2s(...st.pts[i]));
+      ctx.stroke();
     }
     ctx.globalAlpha = 1; ctx.setLineDash([]);
   }
@@ -211,7 +240,7 @@ export function mountBoard(root) {
       ctx.fillStyle = th.surface; ctx.strokeStyle = th.edge; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(ax, ay, r, 0, 7); ctx.fill(); ctx.stroke();
       ctx.beginPath(); ctx.arc(ax, ay, 2.5, 0, 7); ctx.fillStyle = th.edge; ctx.fill();
-      label(narrow ? key : `Anker ${key === 'L' ? 'links' : 'rechts'} (${fmt(a[0], 0)} | ${fmt(a[1], 0)})`, ax + (key === 'L' ? r + 6 : -r - 6), ay - 2, th.rink, key === 'L' ? 'left' : 'right');
+      label(narrow ? key : `Motor ${key === 'L' ? 'left' : 'right'} (${fmt(a[0], 0)} | ${fmt(a[1], 0)})`, ax + (key === 'L' ? r + 6 : -r - 6), ay - 2, th.rink, key === 'L' ? 'left' : 'right');
     }
     if (opts.firmware && connected && st.position?.firmware) {
       const [fx, fy] = w2s(...st.position.firmware);
@@ -246,7 +275,7 @@ export function mountBoard(root) {
     ctx.strokeStyle = '#1f6feb'; ctx.lineWidth = 2.2; ctx.setLineDash([]);
     ctx.beginPath(); ctx.arc(x, y, 11, 0, 7); ctx.stroke();
     if (tr.soll) { const [sx, sy] = w2s(...tr.soll); ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(x, y); ctx.stroke(); }
-    if (tr.dev_mm != null && !tr.moving) label(`Kamera ${fmt(tr.dev_mm, 1)} mm`, x + 14, y - 12, '#1f6feb');
+    if (tr.dev_mm != null && !tr.moving) label(`Camera ${fmt(tr.dev_mm, 1)} mm`, x + 14, y - 12, '#1f6feb');
   }
 
   function drawTarget() {
@@ -303,18 +332,28 @@ export function mountBoard(root) {
     const inside = x >= m && x <= b.width_mm - m && y >= m && y <= b.height_mm - m;
     let txt = `X ${fmt(x, 1)}  Y ${fmt(y, 1)} mm`;
     const p = st?.reference?.set ? st.position?.physical : null;
-    if (p) txt += `  · Abstand zur Gondel ${fmt(Math.hypot(x - p[0], y - p[1]), 1)} mm`;
-    if (!inside) txt += '  · außerhalb des erlaubten Bereichs';
+    if (p) txt += `  · Distance to gondola ${fmt(Math.hypot(x - p[0], y - p[1]), 1)} mm`;
+    if (!inside) txt += '  · outside the allowed area';
     readout.textContent = txt; readout.hidden = false;
   }
 
+  let liveDown = null;                                 // pointer id of the stroke being drawn in live mode
   canvas.addEventListener('pointerdown', (e) => {
-    try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetisch */ }
+    if (live.on) {
+      const p = local(e);
+      if (liveDown == null && e.button === 0 && p[0] >= RL && p[1] <= H - RB) {
+        try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic */ }
+        liveDown = e.pointerId; live.begin(...s2w(...p));
+      }
+      return;
+    }
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic */ }
     ptrs.set(e.pointerId, local(e));
     if (ptrs.size === 1) { startPt = local(e); moved = false; }
     if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]) }; moved = true; }
   });
   canvas.addEventListener('pointermove', (e) => {
+    if (liveDown === e.pointerId) { const q = local(e); live.move(...s2w(...q)); hover = s2w(...q); updateReadout(); return; }
     const p = local(e);
     if (e.pointerType === 'mouse' || !ptrs.size) { hover = p[0] >= RL && p[1] <= H - RB ? s2w(...p) : null; updateReadout(); invalidate(); }
     if (!ptrs.has(e.pointerId)) return;
@@ -329,6 +368,7 @@ export function mountBoard(root) {
     }
   });
   const end = (e) => {
+    if (liveDown === e.pointerId) { liveDown = null; live.end(); return; }
     const was = ptrs.size;
     ptrs.delete(e.pointerId);
     if (ptrs.size < 2) pinch = null;
@@ -351,13 +391,13 @@ export function mountBoard(root) {
   function updateNotes() {
     const s = store.get('state'), connected = s?.connection?.status === 'connected';
     let cls = '', txt = '';
-    if (!connected) { cls = 'note board-note'; txt = 'Nicht verbunden. Oben „Verbinden“ wählen. Brett und Anker sind maßstabsgetreu dargestellt.'; }
-    else if (!s.reference?.set) { cls = 'note warn board-note'; txt = 'Keine Referenz: Die Position der Gondel ist unbekannt. Auf das Brett klicken, wo die Gondel jetzt steht, und „Gondel steht jetzt hier“ wählen. Oder die Koordinaten im Reiter Fahren eintragen.'; }
+    if (!connected) { cls = 'note board-note'; txt = 'Not connected. Press “Connect” at the top, or run Setup. Board and motors are drawn to scale.'; }
+    else if (!s.reference?.set) { cls = 'note warn board-note'; txt = 'Position unknown. Click on the board where the gondola hangs and choose “Set gondola position”, or run Setup.'; }
     note.hidden = !txt; if (txt) { note.className = cls; note.textContent = txt; }
     const tr = store.get('trace'), last = tr.at(-1), p = s?.position?.physical;
     if (connected && s.connection.transport === 'sim' && s.reference?.set && p && last && s.machine.state === 'idle' && !s.machine.busy) {
       simChip.hidden = false;
-      simChip.textContent = `Ist/Soll-Abweichung ${fmt(Math.hypot(last[2] - p[0], last[3] - p[1]), 2)} mm`;
+      simChip.textContent = `Actual vs. target error ${fmt(Math.hypot(last[2] - p[0], last[3] - p[1]), 2)} mm`;
     } else simChip.hidden = true;
   }
 

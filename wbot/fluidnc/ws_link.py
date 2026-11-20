@@ -49,7 +49,7 @@ class WsLink(Link):
 
     def open(self) -> None:
         if _ws_connect is None:  # pragma: no cover
-            raise LinkError("das Paket 'websockets' ist nicht installiert")
+            raise LinkError("the 'websockets' package is not installed")
         with self._state_lock:
             if self._ws is not None:
                 return
@@ -66,7 +66,7 @@ class WsLink(Link):
                     sock.close()
                 except OSError:
                     pass
-                raise LinkError(f"WebSocket-Handshake mit {self.host}:{self.port} fehlgeschlagen: {exc}") from exc
+                raise LinkError(f"WebSocket handshake with {self.host}:{self.port} failed: {exc}") from exc
 
     def close(self) -> None:
         with self._state_lock:

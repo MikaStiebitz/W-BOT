@@ -1,4 +1,4 @@
-"""Errors raised by the machine layer (carry a German message, a slug and an HTTP status)."""
+"""Errors raised by the machine layer (carry a message, a slug and an HTTP status)."""
 from __future__ import annotations
 
 

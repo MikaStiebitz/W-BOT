@@ -14,48 +14,48 @@ _HOST_OK = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9-]{0,30}[A-Za-z0-9])?$")
 
 
 def wifi_commands(ssid: str, hostname: str = "wbot") -> str:
-    """Text with the console commands (German explanations, FluidNC commands verbatim)."""
+    """Text with the console commands (explanations in English, FluidNC commands verbatim)."""
     if not _SSID_OK.match(ssid or ""):
-        raise ValueError("SSID muss 1..32 Zeichen lang sein und darf keinen Zeilenumbruch enthalten.")
+        raise ValueError("The SSID must be 1..32 characters long and must not contain a line break.")
     if not _HOST_OK.match(hostname or ""):
-        raise ValueError("Hostname: nur Buchstaben, Ziffern und '-' (max. 32 Zeichen, kein Punkt).")
+        raise ValueError("Hostname: only letters, digits and '-' (max. 32 characters, no dot).")
     return f"""\
-# W-BOT: Board einmalig ins WLAN bringen  (nur AUSGABE - es wird nichts gesendet)
+# W-BOT: bring the board onto WiFi once  (OUTPUT only - nothing is sent)
 #
-# So gehts: Board per USB-Kabel anschliessen, serielle Konsole oeffnen (115200 Baud, z. B. in der
-# W-BOT-Konsole oder einem Terminalprogramm, Zeilenende LF), die Zeilen unten EINZELN eintippen.
-# Das Passwort setzt DU selbst ein - es steht nirgends im Projekt.
-# Zeilen mit '# UNVERIFIED' sind fuer FluidNC v3.9.9 nicht belegt: erst `$S` tippen und pruefen,
-# ob die Einstellung so heisst (Alternativname steht daneben), dann erst setzen.
+# How: connect the board by USB cable, open the serial console (115200 baud, e.g. in the
+# W-BOT console or a terminal program, line ending LF), and type the lines below ONE AT A TIME.
+# YOU enter the password yourself - it is stored nowhere in the project.
+# Lines marked '# UNVERIFIED' are not documented for FluidNC v3.9.9: first type `$S` and check
+# whether the setting has that name (an alternative name is given next to it), then set it.
 
-$S                                   # listet ALLE echten Einstellungsnamen (Alternative: $Settings/List)
-$Wifi/ListAPs                        # optional: zeigt die sichtbaren WLANs (Board muss ein 2,4-GHz-WLAN sehen)
+$S                                   # lists ALL real setting names (alternative: $Settings/List)
+$Wifi/ListAPs                        # optional: shows the visible WiFi networks (the board must see a 2.4 GHz network)
 
 $Sta/SSID={ssid}
-$Sta/Password=<DEIN-WLAN-PASSWORT>   # selbst einsetzen!
-$Sta/IPMode=DHCP                     # UNVERIFIED fuer v3.9.9 (Wiki-Spiegel aelterer Version: DHCP|Static)
+$Sta/Password=<YOUR-WIFI-PASSWORD>   # fill in yourself!
+$Sta/IPMode=DHCP                     # UNVERIFIED for v3.9.9 (wiki mirror of an older version: DHCP|Static)
 
-$System/Hostname={hostname}          # UNVERIFIED, Alternative je nach Version: $Hostname={hostname}
-$WiFi/Mode=STA                       # UNVERIFIED, Alternative je nach Version: $Radio/Mode=STA   (STA = ins Heimnetz)
-                                     # Werte pruefen mit: $WiFi/Mode=*  bzw. $Radio/Mode=*
+$System/Hostname={hostname}          # UNVERIFIED, alternative depending on version: $Hostname={hostname}
+$WiFi/Mode=STA                       # UNVERIFIED, alternative depending on version: $Radio/Mode=STA   (STA = join the home network)
+                                     # check the values with: $WiFi/Mode=*  or  $Radio/Mode=*
 
-$Telnet/Enable=On                    # UNVERIFIED (Name belegt, Wert On/Off nicht). Port 23 ist Standard ($Telnet/Port)
-# WebSocket: in v3.x laeuft er auf Port 81 (Quelle: Community-Wiki, nicht aus v3.9.9 bestaetigt).
-# Ein eigener Schalter ist nicht belegt - in `$S` nach 'WebSocket' suchen, z. B.:
-#   $WebSocket/Enable=On             # UNVERIFIED, evtl. gibt es ihn nicht (dann haengt er an $Http/Enable)
+$Telnet/Enable=On                    # UNVERIFIED (name documented, value On/Off not). Port 23 is the default ($Telnet/Port)
+# WebSocket: in v3.x it runs on port 81 (source: community wiki, not confirmed for v3.9.9).
+# A separate switch is not documented - search `$S` for 'WebSocket', e.g.:
+#   $WebSocket/Enable=On             # UNVERIFIED, it may not exist (then it hangs off $Http/Enable)
 
-# Danach Board neu starten (Reset-Taste oder Strom). Beim Start meldet es sich im Log:
-#   [MSG:INFO: Connected - IP is 192.168.x.y]     <- DAS ist die IP-Adresse
+# Then restart the board (reset button or power). At startup it reports in the log:
+#   [MSG:INFO: Connected - IP is 192.168.x.y]     <- THAT is the IP address
 #   [MSG:INFO: Telnet Started on port 23]
 #   [MSG:INFO: Start mDNS with hostname:http://{hostname}.local/]
-# IP ohne Neustart: `$I` bzw. `$Sta` (UNVERIFIED, ob die IP dort steht - Passwoerter werden nie angezeigt);
-# sonst in der Geraeteliste des Routers nachsehen (Name '{hostname}').
+# IP without a restart: `$I` or `$Sta` (UNVERIFIED whether the IP is shown there - passwords are never displayed);
+# otherwise look in the router's device list (name '{hostname}').
 #
-# Pruefen vom PC aus (Board und PC im selben WLAN):
-#   python -m wbot probe --board-host {hostname}.local        # nur lesen, bewegt nichts
+# Check from the PC (board and PC on the same WiFi):
+#   python -m wbot probe --board-host {hostname}.local        # read only, moves nothing
 #   python -m wbot serve --connect wifi --board-host {hostname}.local
-# Klappt der Name nicht (mDNS/Bonjour fehlt auf dem PC), die IP-Adresse aus dem Log statt {hostname}.local nehmen.
+# If the name does not resolve (mDNS/Bonjour missing on the PC), use the IP address from the log instead of {hostname}.local.
 #
-# SICHERHEIT: FluidNC-Telnet und -WebSocket haben KEINE Anmeldung. Jeder im selben Netz kann das
-# Board fahren. Nur in einem vertrauenswuerdigen Netz betreiben, Telnet im Zweifel wieder abschalten.
+# SAFETY: FluidNC Telnet and WebSocket have NO authentication. Anyone on the same network can
+# drive the board. Only use it on a trusted network, and switch Telnet off again if in doubt.
 """

@@ -13,7 +13,7 @@ def normalize_protocol(protocol: str | None) -> str:
         return "websocket"
     if p in ("tcp", "telnet"):
         return "telnet"
-    raise LinkError(f"unbekanntes WLAN-Protokoll '{protocol}' (telnet oder websocket)")
+    raise LinkError(f"unknown WiFi protocol '{protocol}' (telnet or websocket)")
 
 
 def default_port(protocol: str | None) -> int:
@@ -26,10 +26,10 @@ def make_board_link(protocol: str | None, host: str, port: int | None = None,
     proto = normalize_protocol(protocol)
     host = (host or "").strip()
     if not host:
-        raise LinkError("kein Host fuer die WLAN-Verbindung angegeben")
+        raise LinkError("no host specified for the WiFi connection")
     p = int(port) if port else DEFAULT_PORTS[proto]
     if not 1 <= p <= 65535:
-        raise LinkError(f"ungueltiger Port {p}")
+        raise LinkError(f"invalid port {p}")
     if proto == "websocket":
         from .ws_link import WsLink
         return WsLink(host, p, connect_timeout)

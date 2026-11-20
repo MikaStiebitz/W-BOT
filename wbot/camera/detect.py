@@ -6,6 +6,7 @@ they were given; mapping to board mm is the caller's job (``geometry.BoardCamera
 from __future__ import annotations
 
 import math
+import threading
 from dataclasses import dataclass
 
 import cv2
@@ -25,19 +26,22 @@ def _dictionary(name: str):
     return cv2.aruco.getPredefinedDictionary(ARUCO_DICTS[name])
 
 
-_DETECTORS: dict[str, object] = {}
+_TLS = threading.local()       # one detector per thread: OpenCV detector objects are not thread-safe
 
 
 def detect_markers(img: np.ndarray, dict_name: str = "4X4_50") -> dict[int, np.ndarray]:
     """{id: corners (4,2) px} in the marker's own order (top-left, top-right, bottom-right, bottom-left
     of the printed marker). Duplicate ids: the larger one wins."""
-    det = _DETECTORS.get(dict_name)
+    dets = getattr(_TLS, "dets", None)
+    if dets is None:
+        dets = _TLS.dets = {}
+    det = dets.get(dict_name)
     if det is None:
         p = cv2.aruco.DetectorParameters()
         p.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
         p.adaptiveThreshWinSizeMax = 53
         det = cv2.aruco.ArucoDetector(_dictionary(dict_name), p)
-        _DETECTORS[dict_name] = det
+        dets[dict_name] = det
     corners, ids, _ = det.detectMarkers(gray(img))
     out: dict[int, np.ndarray] = {}
     if ids is None:
@@ -94,7 +98,15 @@ def detect_board(img: np.ndarray, min_area_frac: float = 0.08) -> np.ndarray | N
                 break
     if best is None:
         return None
-    return order_quad(best / k)
+    q = order_quad(best / k)
+    # implausible: a corner on the image border (the bright area runs out of the picture, e.g. a white wall)
+    # or nearly the whole image - better no suggestion than a wrong one
+    m = 0.015 * max(w0, h0)
+    if np.any(q[:, 0] < m) or np.any(q[:, 0] > w0 - m) or np.any(q[:, 1] < m) or np.any(q[:, 1] > h0 - m):
+        return None
+    if cv2.contourArea(q.astype(np.float32)) > 0.85 * w0 * h0:
+        return None
+    return q
 
 
 # ---------------------------------------------------------------------- ink and crosses
@@ -235,3 +247,40 @@ def find_chessboard(img: np.ndarray, pattern: tuple[int, int]) -> np.ndarray | N
     if not ok or corners is None:
         return None
     return corners.reshape(-1, 2).astype(float)
+
+
+# ---------------------------------------------------------------------- motors
+def find_motors(strip: np.ndarray, px_per_mm: float, min_mm: float = 20.0, max_mm: float = 200.0,
+                min_gap_mm: float = 150.0) -> list[tuple[float, float]]:
+    """The two motors (dark compact objects with their clamps) in a top-down strip above the board.
+    Returns up to two (x, y) pixel positions of the motor bodies, left to right. A suggestion only."""
+    m = (strip.min(axis=2) if strip.ndim == 3 else strip).astype(np.float32)
+    k = max(3, int(60 * px_per_mm) | 1)
+    bg = cv2.dilate(cv2.blur(m, (9, 9)), cv2.getStructuringElement(cv2.MORPH_RECT, (k, k)))
+    dark = ((bg - m) > np.maximum(50.0, 0.3 * bg)).astype(np.uint8)       # motors: much darker than wall and frame
+    dark = cv2.morphologyEx(dark, cv2.MORPH_CLOSE, np.ones((max(3, int(4 * px_per_mm)),) * 2, np.uint8))
+    dark = cv2.morphologyEx(dark, cv2.MORPH_OPEN, np.ones((max(3, int(12 * px_per_mm)),) * 2, np.uint8))  # drop belts, cables
+    n, lab, st, cen = cv2.connectedComponentsWithStats(dark, 8)
+    blobs = []
+    for i in range(1, n):
+        x, y, w, h, a = st[i]
+        wm, hm = w / px_per_mm, h / px_per_mm
+        if wm < min_mm or hm < min_mm * 0.5 or wm > max_mm or hm > max_mm * 1.5 or a < (min_mm * px_per_mm) ** 2 * 0.4:
+            continue
+        blobs.append((float(a), float(cen[i][0]), float(y + 0.3 * h)))     # upper part: motor body above the clamp
+    groups: list[list[tuple[float, float, float]]] = []
+    for b in sorted(blobs, key=lambda t: t[1]):
+        if groups and b[1] - groups[-1][-1][1] < 80 * px_per_mm:
+            groups[-1].append(b)
+        else:
+            groups.append([b])
+    ranked = sorted(groups, key=lambda g: -sum(t[0] for t in g))
+    out: list[tuple[float, float]] = []
+    for g in ranked:
+        a = sum(t[0] for t in g)
+        pt = (sum(t[0] * t[1] for t in g) / a, min(t[2] for t in g))
+        if all(abs(pt[0] - q[0]) > min_gap_mm * px_per_mm for q in out):
+            out.append(pt)
+        if len(out) == 2:
+            break
+    return sorted(out)

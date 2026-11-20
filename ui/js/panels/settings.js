@@ -1,4 +1,4 @@
-// Reiter "Einstellungen": wichtige Config-Werte ansehen/ändern (GET/PUT /api/config), Firmware-Config laden.
+// Tab "Settings": view and change key config values (GET/PUT /api/config), load the firmware config.
 import { h, getPath, setPath, copyText, downloadBlob } from '../util.js';
 import { icon } from '../icons.js';
 import { store } from '../store.js';
@@ -11,26 +11,26 @@ const N = (path, label, unit, step = 'any') => ({ path, label, unit, step, kind:
 const XY = (path, label, unit = 'mm') => ({ path, label, unit, kind: 'xy' });
 
 const GROUPS = [
-  G('Brett', null, [N('board.width_mm', 'Breite', 'mm'), N('board.height_mm', 'Höhe', 'mm'), N('board.margin_mm', 'Sicherheitsrand', 'mm')]),
-  G('Bewegung', null, [N('motion.travel_feed_mm_min', 'Eilgang', 'mm/min', 50), N('motion.draw_feed_mm_min', 'Zeichnen', 'mm/min', 50),
-    N('motion.jog_feed_mm_min', 'Jog', 'mm/min', 50), N('motion.acceleration_mm_s2', 'Beschleunigung', 'mm/s²', 10), XY('motion.park_position', 'Park-Position')]),
-  G('Vorverzerrung', 'Genauigkeit der Kinematik: kleinere Toleranz = mehr Stützpunkte.', [N('motion.predistort_tolerance_mm', 'Toleranz', 'mm', 0.005),
-    N('motion.max_chord_mm', 'Längste Sehne', 'mm'), N('motion.min_chord_mm', 'Kürzeste Sehne', 'mm')]),
-  G('Stift-Servo', null, [N('servos.pen.up_deg', 'Winkel oben', '°', 0.5), N('servos.pen.down_deg', 'Winkel unten', '°', 0.5), N('servos.pen.settle_s', 'Wartezeit', 's', 0.05),
-    N('servos.pen.speed_deg_s', 'Tempo', '°/s', 10), N('servos.pen.center_us', 'Mitte', 'µs', 1), N('servos.pen.us_per_deg', 'Impuls je Grad', 'µs/°', 0.001)]),
-  G('Revolver-Servo', null, [{ path: 'servos.revolver.slots_deg', label: 'Slot-Winkel', unit: '°', kind: 'list' }, N('servos.revolver.settle_s', 'Wartezeit', 's', 0.05),
-    N('servos.revolver.speed_deg_s', 'Tempo', '°/s', 10), N('servos.revolver.center_us', 'Mitte', 'µs', 1), N('servos.revolver.us_per_deg', 'Impuls je Grad', 'µs/°', 0.001)]),
-  G('Geometrie', 'Vorsicht: Diese Werte bestimmen die Genauigkeit der Vorverzerrung. Nur nach Nachmessen ändern.', [XY('geometry.anchor_left', 'Anker links'), XY('geometry.anchor_right', 'Anker rechts'),
-    N('geometry.pulley_pitch_radius_mm', 'Scheibenradius', 'mm', 0.001), N('geometry.belt_scale_left', 'Riemenmaß links', '×', 0.0005), N('geometry.belt_scale_right', 'Riemenmaß rechts', '×', 0.0005),
-    XY('geometry.pen_offset_mm', 'Stift-Versatz'), { path: 'geometry.model', label: 'Modell', kind: 'select', options: [['tangent', 'tangent (genau)'], ['naive', 'naiv (keine Vorverzerrung)']] }]),
+  G('Board', null, [N('board.width_mm', 'Width', 'mm'), N('board.height_mm', 'Height', 'mm'), N('board.margin_mm', 'Safety margin', 'mm')]),
+  G('Motion', null, [N('motion.travel_feed_mm_min', 'Rapid', 'mm/min', 50), N('motion.draw_feed_mm_min', 'Drawing', 'mm/min', 50),
+    N('motion.jog_feed_mm_min', 'Jog', 'mm/min', 50), N('motion.acceleration_mm_s2', 'Acceleration', 'mm/s²', 10), XY('motion.park_position', 'Park position')]),
+  G('Predistortion', 'Kinematics accuracy: a smaller tolerance means more points.', [N('motion.predistort_tolerance_mm', 'Tolerance', 'mm', 0.005),
+    N('motion.max_chord_mm', 'Longest chord', 'mm'), N('motion.min_chord_mm', 'Shortest chord', 'mm')]),
+  G('Pen servo', null, [N('servos.pen.up_deg', 'Up angle', '°', 0.5), N('servos.pen.down_deg', 'Down angle', '°', 0.5), N('servos.pen.settle_s', 'Settle time', 's', 0.05),
+    N('servos.pen.speed_deg_s', 'Speed', '°/s', 10), N('servos.pen.center_us', 'Center', 'µs', 1), N('servos.pen.us_per_deg', 'Pulse per degree', 'µs/°', 0.001)]),
+  G('Revolver servo', null, [{ path: 'servos.revolver.slots_deg', label: 'Slot angles', unit: '°', kind: 'list' }, N('servos.revolver.settle_s', 'Settle time', 's', 0.05),
+    N('servos.revolver.speed_deg_s', 'Speed', '°/s', 10), N('servos.revolver.center_us', 'Center', 'µs', 1), N('servos.revolver.us_per_deg', 'Pulse per degree', 'µs/°', 0.001)]),
+  G('Geometry', 'Caution: these values determine predistortion accuracy. Change them only after measuring.', [XY('geometry.anchor_left', 'Left anchor'), XY('geometry.anchor_right', 'Right anchor'),
+    N('geometry.pulley_pitch_radius_mm', 'Pulley radius', 'mm', 0.001), N('geometry.belt_scale_left', 'Belt scale left', '×', 0.0005), N('geometry.belt_scale_right', 'Belt scale right', '×', 0.0005),
+    XY('geometry.pen_offset_mm', 'Pen offset'), { path: 'geometry.model', label: 'Model', kind: 'select', options: [['tangent', 'tangent (exact)'], ['naive', 'naive (no predistortion)']] }]),
 ];
 
 export function mountSettings(root) {
   const ctl = [];            // {path, kind, get(), set(v)}
   const orig = () => store.get('config');
-  const dirtyNote = h('span', { class: 'chip', hidden: true }, 'Ungespeicherte Änderungen');
-  const saveBtn = h('button', { class: 'btn primary', type: 'button' }, icon('save'), 'Speichern');
-  const resetBtn = h('button', { class: 'btn', type: 'button' }, icon('refresh'), 'Zurücksetzen');
+  const dirtyNote = h('span', { class: 'chip', hidden: true }, 'Unsaved changes');
+  const saveBtn = h('button', { class: 'btn primary', type: 'button' }, icon('save'), 'Save');
+  const resetBtn = h('button', { class: 'btn', type: 'button' }, icon('refresh'), 'Reset');
   const markDirty = () => { dirtyNote.hidden = !Object.keys(patch()).length; };
 
   function build(f) {
@@ -51,14 +51,14 @@ export function mountSettings(root) {
     return h('div', { style: { display: 'contents' } }, cs.map((c) => c.el));
   }
 
-  /* Farben */
+  /* Colors */
   const colorBox = h('div', { class: 'cfg-colors' });
   let colorRows = [];
   function loadColors(cols) {
-    colorRows = cols.map((c) => ({ name: h('input', { type: 'text', value: c.name, 'aria-label': 'Farbname', onInput: markDirty }), hex: h('input', { type: 'color', value: c.hex, 'aria-label': 'Farbwert', onInput: markDirty }) }));
+    colorRows = cols.map((c) => ({ name: h('input', { type: 'text', value: c.name, 'aria-label': 'Color name', onInput: markDirty }), hex: h('input', { type: 'color', value: c.hex, 'aria-label': 'Color value', onInput: markDirty }) }));
     colorBox.replaceChildren(...colorRows.flatMap((r) => [r.hex, r.name]));
   }
-  const colors = () => colorRows.map((r) => ({ name: r.name.value.trim() || 'Farbe', hex: r.hex.value }));
+  const colors = () => colorRows.map((r) => ({ name: r.name.value.trim() || 'Color', hex: r.hex.value }));
 
   function patch() {
     const cfg = orig(), out = {};
@@ -81,13 +81,13 @@ export function mountSettings(root) {
 
   saveBtn.addEventListener('click', () => run(saveBtn, async () => {
     const p = patch();
-    if (!Object.keys(p).length) { toast('Keine Änderungen.', 'info'); return; }
+    if (!Object.keys(p).length) { toast('No changes.', 'info'); return; }
     const cfg = await api.putConfig(p);
     store.set({ config: cfg });
-    toast('Einstellungen gespeichert.', 'ok');
+    toast('Settings saved.', 'ok');
     load();
   }));
-  resetBtn.addEventListener('click', () => { load(); toast('Änderungen verworfen.', 'info'); });
+  resetBtn.addEventListener('click', () => { load(); toast('Changes discarded.', 'info'); });
 
   root.append(h('div', { class: 'sect', style: { position: 'sticky', top: '0', zIndex: '3', background: 'var(--surface)', paddingBottom: 'var(--sp-3)' } },
     h('div', { class: 'row', style: { alignItems: 'center' } }, saveBtn, resetBtn, dirtyNote)));
@@ -95,21 +95,21 @@ export function mountSettings(root) {
     root.append(h('div', { class: 'sect' }, h('h2', null, g.title), g.hint ? h('div', { class: 'note warn' }, g.hint) : null,
       h('div', { class: 'cfg-grid' }, g.fields.map(build))));
   }
-  root.append(h('div', { class: 'sect' }, h('h2', null, 'Farben (Revolver-Slots)'), colorBox,
-    h('p', { class: 'field-hint' }, 'Die Anzahl der Farben ist fest an die Revolver-Slots gekoppelt.')));
+  root.append(h('div', { class: 'sect' }, h('h2', null, 'Colors (revolver slots)'), colorBox,
+    h('p', { class: 'field-hint' }, 'The number of colors is tied to the revolver slots.')));
 
-  /* Firmware-Config */
+  /* Firmware config */
   const pre = h('pre', { class: 'fw mono', hidden: true });
   let fwText = '';
   const getFw = async () => (fwText = await api.firmwareConfig());
-  const showBtn = h('button', { class: 'btn', type: 'button' }, 'Anzeigen');
-  const dlBtn = h('button', { class: 'btn', type: 'button' }, icon('download'), 'Herunterladen');
-  const cpBtn = h('button', { class: 'btn', type: 'button' }, icon('copy'), 'Kopieren');
-  showBtn.addEventListener('click', () => run(showBtn, async () => { if (!pre.hidden) { pre.hidden = true; showBtn.textContent = 'Anzeigen'; return; } await getFw(); pre.textContent = fwText; pre.hidden = false; showBtn.textContent = 'Ausblenden'; }));
-  dlBtn.addEventListener('click', () => run(dlBtn, async () => { await getFw(); downloadBlob(fwText, 'config.yaml', 'text/yaml'); toast('config.yaml heruntergeladen.', 'ok'); }));
-  cpBtn.addEventListener('click', () => run(cpBtn, async () => { await getFw(); toast((await copyText(fwText)) ? 'Firmware-Config kopiert.' : 'Kopieren nicht möglich.', 'info'); }));
-  root.append(h('div', { class: 'sect' }, h('h2', null, 'Firmware-Config (FluidNC)'),
-    h('p', { class: 'muted', style: { fontSize: '14px' } }, 'Wird aus den Werten oben erzeugt. Die Datei wird hier nur geladen und nicht auf die Maschine hochgeladen.'),
+  const showBtn = h('button', { class: 'btn', type: 'button' }, 'Show');
+  const dlBtn = h('button', { class: 'btn', type: 'button' }, icon('download'), 'Download');
+  const cpBtn = h('button', { class: 'btn', type: 'button' }, icon('copy'), 'Copy');
+  showBtn.addEventListener('click', () => run(showBtn, async () => { if (!pre.hidden) { pre.hidden = true; showBtn.textContent = 'Show'; return; } await getFw(); pre.textContent = fwText; pre.hidden = false; showBtn.textContent = 'Hide'; }));
+  dlBtn.addEventListener('click', () => run(dlBtn, async () => { await getFw(); downloadBlob(fwText, 'config.yaml', 'text/yaml'); toast('config.yaml downloaded.', 'ok'); }));
+  cpBtn.addEventListener('click', () => run(cpBtn, async () => { await getFw(); toast((await copyText(fwText)) ? 'Firmware config copied.' : 'Copy not available.', 'info'); }));
+  root.append(h('div', { class: 'sect' }, h('h2', null, 'Firmware config (FluidNC)'),
+    h('p', { class: 'muted', style: { fontSize: '14px' } }, 'Generated from the values above. The file is only loaded here, not uploaded to the machine.'),
     h('div', { class: 'row' }, showBtn, dlBtn, cpBtn), pre));
 
   store.on('config', () => { if (!Object.keys(patch()).length) load(); }, { immediate: true });

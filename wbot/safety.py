@@ -89,49 +89,49 @@ def validate_gcode(lines: list[str], cfg: Config, mapping: Mapping | None, *,
         if w.get("G") == 4 and "P" in w:
             dwell_s += w["P"]
         if (has_xy or has_z) and has_a:
-            problems.append(Problem(i, raw, "Revolver und Bewegung/Stift in derselben Zeile"))
+            problems.append(Problem(i, raw, "Revolver and motion/pen in the same line"))
         if has_z:
             try:
                 z_angle = pen.angle_for_axis(w["Z"] if absolute else (z_axis or 0.0) + w["Z"])
                 if not pen.min_deg - 0.3 <= z_angle <= pen.max_deg + 0.3:
-                    problems.append(Problem(i, raw, f"Stift-Winkel {z_angle:.1f}° außerhalb der Grenzen"))
+                    problems.append(Problem(i, raw, f"Pen angle {z_angle:.1f}° outside the limits"))
             except Exception as exc:  # noqa: BLE001
-                problems.append(Problem(i, raw, f"Stift-Wert ungültig: {exc}"))
+                problems.append(Problem(i, raw, f"Invalid pen value: {exc}"))
             z_axis = w["Z"] if absolute else (z_axis or 0.0) + w["Z"]
             pen_moved, dwell_s = True, 0.0
         if has_a:
             if pen_moved and dwell_s + 1e-9 < cfg.servos.pen.settle_s:
-                problems.append(Problem(i, raw, "Revolver dreht zu früh nach dem Heben: erst warten, bis der Stift oben ist"))
+                problems.append(Problem(i, raw, "Revolver turns too soon after lifting: wait until the pen is up"))
             if pen_state_after(z_axis, cfg) != "up":
-                problems.append(Problem(i, raw, "Revolver darf nur drehen, wenn der Stift sicher oben ist"))
+                problems.append(Problem(i, raw, "The revolver may only turn when the pen is safely up"))
             a_ang = rev.angle_for_axis(w["A"])
             if not rev.min_deg - 0.3 <= a_ang <= rev.max_deg + 0.3:
-                problems.append(Problem(i, raw, f"Revolver-Winkel {a_ang:.1f}° außerhalb der Grenzen"))
+                problems.append(Problem(i, raw, f"Revolver angle {a_ang:.1f}° outside the limits"))
         if has_xy:
             if not absolute:
-                problems.append(Problem(i, raw, "Relative XY-Fahrten (G91) sind gesperrt"))
+                problems.append(Problem(i, raw, "Relative XY moves (G91) are blocked"))
                 continue
             x = w.get("X", pos_xy[0] if pos_xy else None)
             y = w.get("Y", pos_xy[1] if pos_xy else None)
             if x is None or y is None:
-                problems.append(Problem(i, raw, "XY-Fahrt ohne vollstaendige Zielposition"))
+                problems.append(Problem(i, raw, "XY move without a complete target position"))
                 continue
             pos_xy = [x, y]
             if mapping is None:
                 if not allow_unreferenced_xy:
-                    problems.append(Problem(i, raw, "Keine Referenz: absolute Fahrten gesperrt"))
+                    problems.append(Problem(i, raw, "No reference: absolute moves blocked"))
                 continue
             try:
                 p = mapping.to_physical([x, y])
             except KinematicsError as exc:
-                problems.append(Problem(i, raw, f"Position nicht erreichbar: {exc}"))
+                problems.append(Problem(i, raw, f"Position not reachable: {exc}"))
                 continue
             inside = xmin - TOL_MM <= p[0] <= xmax + TOL_MM and ymin - TOL_MM <= p[1] <= ymax + TOL_MM
             if inside:
                 start_outside = False             # entered the safe area: strict from here on
             elif not start_outside:               # (the way in from outside, e.g. the boot corner, is allowed)
                 problems.append(Problem(
-                    i, raw, f"Ziel ({p[0]:.1f}, {p[1]:.1f}) mm außerhalb des erlaubten Bereichs"))
+                    i, raw, f"Target ({p[0]:.1f}, {p[1]:.1f}) mm outside the permitted area"))
     return problems
 
 

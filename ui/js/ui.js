@@ -1,39 +1,45 @@
-// Gemeinsame UI-Mechanik: Toasts, Bestätigungsdialog, Button-Sperren mit Begründung, Doppelklick-Schutz.
+// Shared UI mechanics: notices, confirm dialog, disabling buttons with a reason, double-click protection.
 import { h, ApiError } from './util.js';
 
-/* ---------- Toasts ---------- */
-const recent = new Map();   // text -> {el, n, timer}
+/* ---------- Notices ----------
+   One message per key (same key = replace, never stack), at most 3 visible, always dismissible.
+   Errors stay until dismissed or until they time out; the same text is never shown twice. */
+const MAX_NOTICES = 3;
+const notices = new Map();   // key -> {el, text, timer}
 
-export function toast(text, kind = 'info', ms = kind === 'error' ? 7000 : 3200) {
+export function notice(key, text, kind = 'info', { ms } = {}) {
   const box = document.getElementById('toasts');
   if (!box || !text) return;
-  const key = kind + '|' + text;
-  const hit = recent.get(key);
-  if (hit && hit.el.isConnected) {          // gleiche Meldung: zählen statt stapeln
-    hit.n += 1;
-    hit.count.textContent = `×${hit.n}`;
-    clearTimeout(hit.timer);
-    hit.timer = setTimeout(() => close(key), ms);
-    return;
+  const life = ms ?? (kind === 'error' ? 15000 : kind === 'warn' ? 9000 : 3200);
+  const old = notices.get(key);
+  if (old && old.el.isConnected) {
+    if (old.text === text && old.kind === kind) { clearTimeout(old.timer); old.timer = life ? setTimeout(() => clearNotice(key), life) : null; return; }
+    clearNotice(key);
   }
-  const count = h('span', { class: 'count' });
-  const el = h('div', { class: 'toast ' + kind, role: kind === 'error' ? 'alert' : 'status', onClick: () => close(key) },
-    h('span', { style: { flex: '1' } }, text), count);
-  const rec = { el, n: 1, count, timer: setTimeout(() => close(key), ms) };
-  recent.set(key, rec);
+  const close = h('button', { class: 'toast-x', type: 'button', 'aria-label': 'Dismiss', title: 'Dismiss', onClick: () => clearNotice(key) }, '×');
+  const el = h('div', { class: 'toast ' + kind, role: kind === 'error' ? 'alert' : 'status' }, h('span', { class: 'toast-t' }, text), close);
+  const rec = { el, text, kind, timer: life ? setTimeout(() => clearNotice(key), life) : null };
+  notices.set(key, rec);
   box.append(el);
-  while (box.children.length > 4) box.firstChild.remove();
+  while (box.children.length > MAX_NOTICES) {               // drop the oldest one
+    const first = [...notices.entries()].find(([, r]) => r.el === box.firstChild);
+    if (first) clearNotice(first[0]); else box.firstChild.remove();
+  }
 }
-function close(key) {
-  const r = recent.get(key);
+
+export function clearNotice(key) {
+  const r = notices.get(key);
   if (!r) return;
   clearTimeout(r.timer);
   r.el.remove();
-  recent.delete(key);
+  notices.delete(key);
 }
 
-/* ---------- Bestätigungsdialog ---------- */
-export function confirmDialog({ title, text, ok = 'OK', cancel = 'Abbrechen', danger = false }) {
+/** Compatible helper: the text is the key, so the same message never appears twice. */
+export function toast(text, kind = 'info', ms) { notice(kind + '|' + text, text, kind, ms == null ? {} : { ms }); }
+
+/* ---------- Confirm dialog ---------- */
+export function confirmDialog({ title, text, ok = 'OK', cancel = 'Cancel', danger = false }) {
   return new Promise((resolve) => {
     const dlg = h('dialog', null,
       h('h2', null, title),
@@ -47,7 +53,7 @@ export function confirmDialog({ title, text, ok = 'OK', cancel = 'Abbrechen', da
   });
 }
 
-/* ---------- Sperren mit Begründung ---------- */
+/* ---------- Disabling with a reason ---------- */
 function sync(el) {
   const dis = !!el._reason || !!el._busy;
   el.disabled = dis;
@@ -57,7 +63,7 @@ function sync(el) {
   else el.removeAttribute('title');
 }
 
-/** Sperrt (reason = Text) oder entsperrt (reason = '' / null) ein Bedienelement. */
+/** Disables (reason = text) or enables (reason = '' / null) a control. */
 export function gate(el, reason) {
   const r = reason || '';
   if (el._reason === r) return;
@@ -65,12 +71,12 @@ export function gate(el, reason) {
   sync(el);
 }
 
-/** Zeigt die Sperr-Begründung als lesbaren Text (auch für Touch ohne Tooltip). */
+/** Shows the reason as readable text (also on touch devices without tooltips). */
 export function gateNote(noteEl, reason) {
   noteEl.textContent = reason || '';
 }
 
-/** Führt fn aus, sperrt den Button währenddessen (kein Doppelklick), fängt alle Fehler. */
+/** Runs fn, disables the button meanwhile (no double click), catches every error. */
 export async function run(btn, fn) {
   if (btn) {
     if (btn._busy) return undefined;
@@ -93,7 +99,7 @@ export async function run(btn, fn) {
 }
 
 export function reportError(e) {
-  if (e instanceof ApiError) return;     // api.js hat schon einen Toast gezeigt
+  if (e instanceof ApiError) return;     // api.js already showed the notice
   console.error(e);
-  toast('Unerwarteter Fehler: ' + (e && e.message ? e.message : e), 'error');
+  notice('unexpected', 'Something went wrong: ' + (e && e.message ? e.message : e), 'error');
 }

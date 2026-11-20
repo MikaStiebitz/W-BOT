@@ -77,7 +77,7 @@ class _Session:
     def check_deadline(self) -> None:
         if time.monotonic() > self.deadline:
             self.abort()
-            raise XmodemError("Zeitlimit beim XMODEM-Upload ueberschritten")
+            raise XmodemError("XMODEM upload timed out")
 
     def abort(self) -> None:
         try:
@@ -105,8 +105,8 @@ class _Session:
                 return True
             if stripped and set(stripped) == {NAK}:
                 return False
-        raise XmodemError("Der Controller startet XMODEM nicht (kein 'C' empfangen). "
-                          "Laeuft noch ein Reader auf dem Port? Firmware zu alt?")
+        raise XmodemError("The controller does not start XMODEM (no 'C' received). "
+                          "Is a reader still running on the port? Firmware too old?")
 
     def read_reply(self, first_block: bool) -> int | None:
         """Next ACK/NAK/CAN within ``ack_timeout`` (None = timeout). Other bytes are skipped."""
@@ -132,11 +132,11 @@ def _send_with_retries(s: _Session, packet: bytes, what: str, *, first_block: bo
         if reply == ACK:
             return
         if reply == CAN:
-            raise XmodemCancelled(f"Der Controller hat den Upload abgebrochen ({what})")
-        log.debug("%s: %s, Versuch %d/%d", what, "NAK" if reply == NAK else "Timeout",
+            raise XmodemCancelled(f"The controller aborted the upload ({what})")
+        log.debug("%s: %s, attempt %d/%d", what, "NAK" if reply == NAK else "timeout",
                   attempt, max_retries)
     s.abort()
-    raise XmodemError(f"{what}: {max_retries} Versuche ohne ACK - Upload abgebrochen")
+    raise XmodemError(f"{what}: {max_retries} attempts without ACK - upload aborted")
 
 
 def _collect_response(s: _Session, response_timeout: float) -> str:
@@ -151,9 +151,9 @@ def _collect_response(s: _Session, response_timeout: float) -> str:
             break
     text = buf.decode("utf-8", "replace").replace("\r", "")
     if re.search(r"^error:\d+", text, re.MULTILINE):
-        raise XmodemError(f"Der Controller meldet nach dem Transfer einen Fehler: {text.strip()}")
+        raise XmodemError(f"The controller reports an error after the transfer: {text.strip()}")
     if not re.search(r"^ok\s*$", text, re.MULTILINE):
-        log.warning("kein 'ok' nach dem XMODEM-Transfer empfangen (Antwort: %r)", text.strip())
+        log.warning("no 'ok' received after the XMODEM transfer (response: %r)", text.strip())
     return text
 
 
@@ -171,10 +171,10 @@ def upload_config(link: Link, text: str, *, filename: str = "config.yaml",
     (``ok``, ``[MSG:...]``); raises :class:`XmodemError` / :class:`XmodemCancelled` on failure.
     """
     if not _FILENAME_OK.match(filename):
-        raise ValueError(f"unzulaessiger Dateiname: {filename!r}")
+        raise ValueError(f"invalid file name: {filename!r}")
     payload = text.encode("utf-8")
     if not payload:
-        raise ValueError("leere Konfiguration wird nicht hochgeladen")
+        raise ValueError("an empty configuration will not be uploaded")
     blocks = split_blocks(payload)
     s = _Session(link, time.monotonic() + timeout, ack_timeout)
 
@@ -184,7 +184,7 @@ def upload_config(link: Link, text: str, *, filename: str = "config.yaml",
         pass
     link.write(f"$Xmodem/Receive={filename}\n".encode("ascii"))
     crc_mode = s.wait_start(start_timeout)
-    log.info("XMODEM %s: %d Bytes in %d Bloecken", "CRC" if crc_mode else "Checksumme",
+    log.info("XMODEM %s: %d bytes in %d blocks", "CRC" if crc_mode else "checksum",
              len(payload), len(blocks))
 
     for i, chunk in enumerate(blocks):

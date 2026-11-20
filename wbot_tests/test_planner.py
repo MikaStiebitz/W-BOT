@@ -145,7 +145,7 @@ def test_clip_warning_and_strict_mode():
     m = MAPPINGS["centre-ref"]()
     d = D(([[-50, 500], [750, 500], [1600, 500]], 0))
     pl = plan(d, CFG, m)
-    assert pl.warnings and "abgeschnitten" in pl.warnings[0]
+    assert pl.warnings and "clipped" in pl.warnings[0]
     for l in pl.lines:
         if l.phys:
             assert RECT[0] - 1e-6 <= l.phys[0] <= RECT[2] + 1e-6

@@ -121,9 +121,9 @@ servo:
 colors:
   # Colour of the marker physically loaded in each revolver slot.
   # Purely cosmetic for the UI + colour separation target.
-  - { slot: 1, name: "schwarz", hex: "#111111" }
-  - { slot: 2, name: "rot",     hex: "#d32f2f" }
-  - { slot: 3, name: "blau",    hex: "#1565c0" }
+  - { slot: 1, name: "black", hex: "#111111" }
+  - { slot: 2, name: "red",     hex: "#d32f2f" }
+  - { slot: 3, name: "blue",    hex: "#1565c0" }
 
 safe_area:
   # Margin from the physical board edge.

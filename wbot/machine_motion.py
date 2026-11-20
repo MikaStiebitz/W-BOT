@@ -16,7 +16,7 @@ class MotionMixin:
     def _fmt_feed(self, feed: float | None, default: float) -> float:
         f = float(feed or default)
         if not 10 <= f <= max(self.cfg.firmware.max_rate_mm_min, 1.0) * 1.0001:
-            raise MachineError(f"Vorschub {f:.0f} mm/min außerhalb 10..{self.cfg.firmware.max_rate_mm_min:.0f}.",
+            raise MachineError(f"Feed rate {f:.0f} mm/min outside 10..{self.cfg.firmware.max_rate_mm_min:.0f}.",
                                "bad_feed", 400)
         return f
 
@@ -32,7 +32,7 @@ class MotionMixin:
         xmin, ymin, xmax, ymax = self.cfg.safe_rect()
         if not (xmin <= x <= xmax and ymin <= y <= ymax):
             raise MachineError(
-                f"Ziel ({x:.1f}, {y:.1f}) mm liegt außerhalb des erlaubten Bereichs "
+                f"Target ({x:.1f}, {y:.1f}) mm is outside the permitted area "
                 f"({xmin:.0f}..{xmax:.0f} x {ymin:.0f}..{ymax:.0f} mm).", "out_of_bounds", 422)
 
     def goto(self, x: float, y: float, feed: float | None = None, pen: str | None = "up") -> dict:
@@ -42,7 +42,7 @@ class MotionMixin:
             self._check_target(x, y)
             cur = self.phys_xy()
             if cur is None:
-                raise MachineError("Aktuelle Position unbekannt.", "no_position")
+                raise MachineError("Current position unknown.", "no_position")
             if pen != "keep" and (self.pen_up() is not True or not self.pen_known):
                 self._servo_move_locked("pen", self.cfg.servos.pen.up_deg)
             f = self._fmt_feed(feed, self.cfg.motion.travel_feed_mm_min)
@@ -53,20 +53,20 @@ class MotionMixin:
         with self._cmd():
             self._ready_for_motion()
             if abs(dx) > 500 or abs(dy) > 500:
-                raise MachineError("Jog-Schritt zu groß (max. 500 mm).", "bad_step", 400)
+                raise MachineError("Jog step too large (max. 500 mm).", "bad_step", 400)
             f = self._fmt_feed(feed, self.cfg.motion.jog_feed_mm_min)
             if self.mapping is None:
-                raise MachineError("Ohne Referenz ist Jog gesperrt - erst die Gondelposition bestätigen.",
+                raise MachineError("Jog is locked without a reference - confirm the gondola position first.",
                                    "no_reference")
             cur = self.phys_xy()
             if cur is None:
-                raise MachineError("Aktuelle Position unbekannt.", "no_position")
+                raise MachineError("Current position unknown.", "no_position")
             tx, ty = cur[0] + dx, cur[1] + dy
             xmin, ymin, xmax, ymax = self.cfg.safe_rect()
             want = (tx, ty)
             tx, ty = min(max(tx, xmin), xmax), min(max(ty, ymin), ymax)   # stop at the edge
             if np.hypot(tx - cur[0], ty - cur[1]) < 1e-6:
-                raise MachineError("Am Rand des erlaubten Bereichs.", "out_of_bounds", 422)
+                raise MachineError("At the edge of the permitted area.", "out_of_bounds", 422)
             # Pen position unknown after power-up/reset (Z sits at 0 = "down"): lift first, never scribble.
             if pen == "up" or (pen is None and not self.pen_known):
                 self._servo_move_locked("pen", self.cfg.servos.pen.up_deg)
@@ -74,7 +74,7 @@ class MotionMixin:
         clamped = abs(want[0] - tx) > 1e-6 or abs(want[1] - ty) > 1e-6
         out = {"ok": True, "target": [tx, ty], "clamped": clamped}
         if clamped:
-            out["warning"] = f"Schritt am Rand des erlaubten Bereichs gekürzt (Ziel {tx:.1f} | {ty:.1f} mm)."
+            out["warning"] = f"Step shortened at the edge of the permitted area (target {tx:.1f} | {ty:.1f} mm)."
         return out
 
     def park(self) -> dict:
@@ -96,7 +96,7 @@ class MotionMixin:
     def _servo_move_locked(self, which: str, angle: float) -> None:
         if which == "revolver":
             if not self.cfg.servos.revolver.enabled:
-                raise MachineError("Revolver-Servo ist in der Config deaktiviert.", "no_revolver", 422)
+                raise MachineError("The revolver servo is disabled in the config.", "no_revolver", 422)
             if self.pen_up() is not True or not self.pen_known:  # pen first, never both at once
                 self._send_lines(self._servo_lines("pen", self.cfg.servos.pen.up_deg))
                 self.pen_known = True
@@ -108,7 +108,7 @@ class MotionMixin:
         pen = self.cfg.servos.pen
         if angle is None:
             if state not in ("up", "down"):
-                raise MachineError("state muss 'up' oder 'down' sein.", "bad_request", 400)
+                raise MachineError("state must be 'up' or 'down'.", "bad_request", 400)
             angle = pen.up_deg if state == "up" else pen.down_deg
         with self._cmd():
             self._ready_for_motion()
@@ -119,7 +119,7 @@ class MotionMixin:
         slots = self.cfg.servos.revolver.slots_deg
         if angle is None:
             if slot is None or not 1 <= slot <= len(slots):
-                raise MachineError(f"slot muss 1..{len(slots)} sein.", "bad_request", 400)
+                raise MachineError(f"slot must be 1..{len(slots)}.", "bad_request", 400)
             angle = slots[slot - 1]
         with self._cmd():
             self._ready_for_motion()
@@ -128,7 +128,7 @@ class MotionMixin:
 
     def set_servo_raw(self, servo: str, angle: float) -> dict:
         if servo not in ("pen", "revolver"):
-            raise MachineError("servo muss 'pen' oder 'revolver' sein.", "bad_request", 400)
+            raise MachineError("servo must be 'pen' or 'revolver'.", "bad_request", 400)
         with self._cmd():
             self._ready_for_motion()
             self._servo_move_locked(servo, float(angle))

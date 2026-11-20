@@ -16,7 +16,8 @@
 |---|---|
 | 🎨 **3 colours, no ramp** | Steel pins glide flat over a park ring; a crank lifter raises one pen 5 mm |
 | 🎯 **Accurate** | Software pre-distorts every point for belt wrap and gondola tilt (< 0.05 mm in the simulator) |
-| 🖥️ **Web UI + simulator** | Jog, calibrate, preview, draw. Starts in a simulator, real hardware only on request |
+| 🖥️ **Web UI + simulator** | Drop an image (PNG, JPEG, SVG), see the traced pen paths, set up board and motors with one click, draw. Starts in a simulator, real hardware only on request |
+| 🖌️ **Per-pen colour and width** | Interactive 3D revolver view; the line width is used for preview and hatching |
 | 📷 **Camera calibration** *(experimental)* | Board overlay, tape-measure and automatic calibration |
 | 🤖 **AI drawing** | [MCP](https://modelcontextprotocol.io) server: preview and draw shapes, text and SVG safely |
 | 📶 **Wi-Fi** | Telnet / WebSocket to the FluidNC board; fake board for testing |
@@ -24,7 +25,7 @@
 
 <p align="center">
   <img src="docs/img/ui-simulator.png" alt="Web UI drawing a pentagram in the simulator" width="720"><br>
-  <sub>Web UI in simulator mode (interface text is currently German)</sub>
+  <sub>Web UI in simulator mode: drop an image, see the traced pen paths, press Draw</sub>
 </p>
 
 ## Build one

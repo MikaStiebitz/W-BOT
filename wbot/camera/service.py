@@ -1,15 +1,15 @@
 """CameraService: one per app. Owns the frame source, the board mapping and the gondola tracking.
 
 Settings live in ``config/state/camera.json`` (written only when ``persist``), never in wbot.yaml:
-they describe where this camera hangs today, not the machine. Errors are ``MachineError`` with
-German messages, like the rest of the API.
+they describe where this camera hangs today, not the machine. Errors are ``MachineError``, like the
+rest of the API.
 """
 from __future__ import annotations
 
 import copy
 import json
 import logging
-import math
+import os
 import threading
 import time
 from pathlib import Path
@@ -20,15 +20,20 @@ import numpy as np
 
 from ..errors import MachineError
 from . import detect
-from .geometry import BoardCamera, CameraGeometryError, calibrate_lens
+from .geometry import BoardCamera, CameraGeometryError
 from .simcam import SimCamera
+from .service_tools import ToolsMixin
 from .sources import DeviceSource, SimSource, Source, StillSource, UrlSource
+from .tracking import TrackingMixin
+from .guard import GuardMixin
 
 if TYPE_CHECKING:
     from ..machine import Machine
 
 log = logging.getLogger(__name__)
-CAMERA_FILE = Path(__file__).resolve().parent.parent.parent / "config" / "state" / "camera.json"
+# Camera state lives next to the machine state; WBOT_STATE_DIR moves it (side servers, tests).
+_STATE_DIR = Path(os.environ.get("WBOT_STATE_DIR") or Path(__file__).resolve().parent.parent.parent / "config" / "state")
+CAMERA_FILE = _STATE_DIR / "camera.json"
 
 DEFAULTS: dict[str, Any] = {
     "source": {"kind": "none", "index": 0, "url": "", "width": 1920, "height": 1080, "fps": 30},
@@ -41,11 +46,13 @@ DEFAULTS: dict[str, Any] = {
                           {"id": 2, "x": 1450.0, "y": 50.0}, {"id": 3, "x": 50.0, "y": 50.0}],
                 "gondola": {"enabled": True, "id": 10, "size_mm": 50.0, "height_mm": 36.0, "offset_mm": [0.0, 90.0]}},
     "tracking": {"warn_mm": 8.0},
-    "view": {"px_per_mm": 1.0, "margin_mm": 30.0},
+    "view": {"px_per_mm": 1.0, "margin_mm": 30.0, "fps": 10},     # fps: how often the browser fetches a picture
     "line_mm": 2.0,              # marker line width (cross detection)
     "latency_ms": 150.0,
+    "anchor_z_mm": 41.0,
+    "watch": {"enabled": True},  # follow the board mapping when the camera was moved
+    "people": {"enabled": True, "guard": "warn", "filter": False, "resume": True},         # pulley centres in front of the board (motors clamped to the frame)
 }
-CHESS_DEFAULT = (9, 6)
 
 
 def _merge(a: dict, b: dict) -> dict:
@@ -55,7 +62,7 @@ def _merge(a: dict, b: dict) -> dict:
     return out
 
 
-class CameraService:
+class CameraService(ToolsMixin, TrackingMixin, GuardMixin):
     def __init__(self, machine: "Machine", *, persist: bool = False, path: Path | None = None):
         self.m, self.persist, self.path = machine, persist, Path(path or CAMERA_FILE)
         self._lock = threading.RLock()
@@ -72,6 +79,7 @@ class CameraService:
         self._track_thread: threading.Thread | None = None
         self._jpeg_cache: dict[tuple, bytes] = {}
         self._rebuild_geometry()
+        self._init_guard()
         if self.settings["source"]["kind"] != "none":
             try:
                 self._open_source()
@@ -101,20 +109,20 @@ class CameraService:
     def configure(self, patch: dict) -> dict:
         """Change settings (partial). Reopens the source when it changed."""
         if not isinstance(patch, dict):
-            raise MachineError("Erwartet ein Objekt mit Kamera-Einstellungen.", "bad_request", 400)
+            raise MachineError("Expected an object with camera settings.", "bad_request", 400)
         allowed = set(DEFAULTS) - {"calib", "lens"}
         bad = [k for k in patch if k not in allowed]
         if bad:
-            raise MachineError(f"Unbekannte Kamera-Einstellung: {', '.join(bad)}", "bad_request", 400)
+            raise MachineError(f"Unknown camera setting: {', '.join(bad)}", "bad_request", 400)
         src = patch.get("source")
         if src is not None:
             kind = src.get("kind", self.settings["source"]["kind"])
             if kind not in ("none", "device", "url", "sim"):
-                raise MachineError("Kameraquelle muss none, device, url oder sim sein.", "bad_request", 400)
+                raise MachineError("Camera source must be none, device, url or sim.", "bad_request", 400)
             if kind == "url" and not str(src.get("url", self.settings["source"]["url"])).strip():
-                raise MachineError("Bitte eine Stream-Adresse angeben.", "bad_request", 400)
+                raise MachineError("Please give a stream address.", "bad_request", 400)
         if "rotate" in patch and patch["rotate"] not in (0, 90, 180, 270):
-            raise MachineError("Drehung muss 0, 90, 180 oder 270 Grad sein.", "bad_request", 400)
+            raise MachineError("Rotation must be 0, 90, 180 or 270 degrees.", "bad_request", 400)
         with self._lock:
             old_src = dict(self.settings["source"])
             old_orient = (self.settings["rotate"], self.settings["mirror"])
@@ -167,6 +175,33 @@ class CameraService:
             self.source = StillSource(image).start()
             self._start_tracking()
 
+    def devices_in_use(self) -> dict[int, np.ndarray]:
+        """index -> latest frame of the open webcam (a probe must not open it a second time)."""
+        src = self.source
+        f = src.latest() if isinstance(src, DeviceSource) else None
+        return {src.index: f.image} if f is not None else {}
+
+    def pick_webcam(self, timeout: float = 20.0) -> dict:
+        """Use the open camera if it delivers a real picture, else the first webcam that does (virtual
+        cameras without a source deliver black and are skipped)."""
+        from .sources import looks_blank, probe_devices
+        src = self.source
+        f = src.latest() if src is not None else None
+        if f is not None and not looks_blank(f.image):
+            return {"index": getattr(src, "index", None), "kind": src.kind, "changed": False}
+        devs = [d for d in probe_devices(6, 120, self.devices_in_use()) if not d["blank"]]
+        if not devs:
+            raise MachineError("No webcam delivers a picture. Plugged in? Lens cap off?", "no_camera", 409)
+        idx = devs[0]["index"]
+        self.configure({"source": {"kind": "device", "index": idx}})
+        t_end = time.time() + timeout
+        while time.time() < t_end:
+            s2 = self.source
+            if s2 is not None and s2.latest() is not None:
+                return {"index": idx, "kind": "device", "changed": True}
+            time.sleep(0.2)
+        raise MachineError(f"Webcam {idx} does not deliver a picture.", "no_frame", 503)
+
     def _close_source(self) -> None:
         self._track_stop.set()
         if self._track_thread and self._track_thread is not threading.current_thread():
@@ -195,10 +230,10 @@ class CameraService:
         """(image, t, seq) of the newest oriented frame. Raises when no camera delivers."""
         src = self.source
         if src is None:
-            raise MachineError("Keine Kamera gewählt (Reiter Kamera).", "no_camera", 409)
+            raise MachineError("No camera selected (Camera tab).", "no_camera", 409)
         f = src.wait_frame(after_seq, timeout) if after_seq or src.latest() is None else src.latest()
         if f is None:
-            raise MachineError(src.error or "Die Kamera liefert noch kein Bild.", "no_frame", 503)
+            raise MachineError(src.error or "The camera delivers no picture yet.", "no_frame", 503)
         return self._orient(f.image), f.t, f.seq
 
     def averaged(self, n: int = 6, timeout: float = 6.0) -> np.ndarray:
@@ -240,19 +275,23 @@ class CameraService:
     def geometry(self) -> BoardCamera:
         g = self.geom
         if g is None:
-            raise MachineError("Die Kamera ist noch nicht auf die Tafel eingemessen (Ecken setzen oder Marker erkennen).",
+            raise MachineError("The camera is not aligned to the board yet (detect the board or set the corners).",
                                "camera_uncalibrated", 409)
         if self.source is not None and self.source.latest() is not None:
             img, _, _ = self.frame()
             if (img.shape[1], img.shape[0]) != tuple(g.image_size):
-                raise MachineError(f"Die Kamera-Auflösung hat sich geändert ({img.shape[1]}x{img.shape[0]} statt "
-                                   f"{g.image_size[0]}x{g.image_size[1]}): bitte neu einmessen.", "camera_uncalibrated", 409)
+                raise MachineError(f"The camera resolution changed ({img.shape[1]}x{img.shape[0]} instead of "
+                                   f"{g.image_size[0]}x{g.image_size[1]}): please align the board again.", "camera_uncalibrated", 409)
         return g
 
-    def set_correspondences(self, image_points, board_points, method: str = "corners", image_size=None) -> dict:
+    def set_correspondences(self, image_points, board_points, method: str = "corners", image_size=None,
+                            image: np.ndarray | None = None) -> dict:
+        if image is None and self.source is not None and self.source.latest() is not None:
+            image, _, _ = self.frame()
         if image_size is None:
-            img, _, _ = self.frame()
-            image_size = (img.shape[1], img.shape[0])
+            if image is None:
+                image, _, _ = self.frame()
+            image_size = (image.shape[1], image.shape[0])
         with self._lock:
             lens = self.settings.get("lens")
             K = dist = None
@@ -268,10 +307,12 @@ class CameraService:
             self._save()
             self.geom, self.geom_error = g, None
             self._jpeg_cache.clear()
+            if image is not None and (image.shape[1], image.shape[0]) == tuple(image_size):
+                self._set_reference(image)          # for noticing later camera movement
         cov = g.coverage((0.0, 0.0, self.m.cfg.board.width_mm, self.m.cfg.board.height_mm))
         warnings = []
         if g.rms_mm > 3.0:
-            warnings.append(f"Die Punkte passen schlecht zusammen ({g.rms_mm:.1f} mm Restfehler). Positionen prüfen.")
+            warnings.append(f"The points do not fit well together ({g.rms_mm:.1f} mm residual). Check their positions.")
         return {"ok": True, "rms_px": g.rms_px, "rms_mm": g.rms_mm, "warnings": warnings, "coverage": cov}
 
     def clear_calibration(self) -> dict:
@@ -283,11 +324,13 @@ class CameraService:
 
     def suggest_board(self) -> dict:
         """Whiteboard outline found in the image (not applied; the UI shows draggable corners)."""
-        img, _, _ = self.frame()
-        q = detect.detect_board(img)
+        img = self.averaged(3)
+        from .boardfind import find_board
+        found = find_board(img)                     # frame edges (+ corner caps): works on a white wall
+        q = found[0] if found is not None else detect.detect_board(img)
         b = self.m.cfg.board
         if q is None:
-            raise MachineError("Die Tafel wurde im Bild nicht gefunden. Bitte die vier Ecken von Hand setzen.", "not_found", 422)
+            raise MachineError(_board_hint(img), "not_found", 422)
         return {"image_points": q.tolist(),
                 "board_points": [[0.0, b.height_mm], [b.width_mm, b.height_mm], [b.width_mm, 0.0], [0.0, 0.0]],
                 "image_size": [int(img.shape[1]), int(img.shape[0])]}
@@ -308,149 +351,36 @@ class CameraService:
             brd_pts += [[x - s, y + s], [x + s, y + s], [x + s, y - s], [x - s, y - s]]
             used.append(int(b["id"]))
         missing = [int(b["id"]) for b in mk["board"] if int(b["id"]) not in used]
+        if not used:
+            raise MachineError("No board markers in the picture. Print and stick the markers first (marker sheet), or set the "
+                               "corners by hand.", "not_found", 422)
         if len(used) < 2:
-            raise MachineError(f"Nur {len(used)} Tafel-Marker erkannt (nötig: mindestens 2, besser 4). "
-                               f"Fehlend: {', '.join(map(str, missing)) or '-'}.", "not_found", 422)
-        out = self.set_correspondences(img_pts, brd_pts, "markers", (img.shape[1], img.shape[0]))
+            raise MachineError(f"Only {len(used)} board markers found (at least 2 needed, 4 is better). "
+                               f"Missing: {', '.join(map(str, missing)) or '-'}.", "not_found", 422)
+        out = self.set_correspondences(img_pts, brd_pts, "markers", (img.shape[1], img.shape[0]), image=img)
         out["markers"], out["missing"] = used, missing
         if missing:
-            out["warnings"].append(f"Marker {', '.join(map(str, missing))} nicht gefunden - mit allen vier ist es genauer.")
+            out["warnings"].append(f"Marker {', '.join(map(str, missing))} not found - all four are more accurate.")
         return out
 
-    # ------------------------------------------------------------------ lens
-    def lens_capture(self, cols: int = CHESS_DEFAULT[0], rows: int = CHESS_DEFAULT[1]) -> dict:
-        img, _, _ = self.frame()
-        c = detect.find_chessboard(img, (int(cols), int(rows)))
-        if c is None:
-            raise MachineError(f"Kein Schachbrett mit {cols} x {rows} inneren Ecken im Bild gefunden.", "not_found", 422)
-        with self._lock:
-            self.lens_views.append(c)
-            self._lens_pattern = (int(cols), int(rows), (img.shape[1], img.shape[0]))
-        return {"views": len(self.lens_views)}
-
-    def lens_compute(self, square_mm: float = 25.0) -> dict:
-        with self._lock:
-            pat = getattr(self, "_lens_pattern", None)
-            if pat is None:
-                raise MachineError("Noch keine Schachbrett-Aufnahmen.", "bad_request", 400)
-            try:
-                lens = calibrate_lens(self.lens_views, pat[:2], float(square_mm), pat[2])
-            except CameraGeometryError as exc:
-                raise MachineError(str(exc), "bad_calibration", 422) from exc
-            self.settings["lens"] = lens
-            self._save()
-            self._rebuild_geometry()
-        return {"lens": lens, "hint": "Danach die Tafel neu einmessen, falls die Entzerrung nicht mehr passt."}
-
-    def lens_clear(self) -> dict:
-        with self._lock:
-            self.lens_views.clear()
-            self.settings["lens"] = None
-            self._save()
-            self._rebuild_geometry()
-        return self.info()
-
-    # ------------------------------------------------------------------ tracking (gondola marker)
-    def _start_tracking(self) -> None:
-        self._track_stop = threading.Event()
-        self._track_thread = threading.Thread(target=self._track_loop, args=(self._track_stop,), name="camera-track", daemon=True)
-        self._track_thread.start()
-
-    def _track_loop(self, stop: threading.Event) -> None:
-        seq = 0
-        while not stop.wait(0.2):
-            try:
-                seq = self._track_once(seq)
-            except MachineError:
-                pass
-            except Exception:  # noqa: BLE001
-                log.exception("camera tracking failed")
-
-    def _track_once(self, seq: int) -> int:
-        g, src = self.geom, self.source
-        gm = self.settings["markers"].get("gondola") or {}
-        if g is None or src is None or not gm.get("enabled"):
-            return seq
-        f = src.latest()
-        if f is None or f.seq == seq:
-            return seq
-        img = self._orient(f.image)
-        if (img.shape[1], img.shape[0]) != tuple(g.image_size):
-            return f.seq
-        found = detect.detect_markers(img, self.settings["markers"]["dict"]).get(int(gm["id"]))
-        soll = self.m.phys_xy() if self.m.mapping is not None else None
-        ms, _ = self.m.machine_state()
-        rec: dict[str, Any] = {"t": f.t, "seen": found is not None, "moving": ms != "idle",
-                               "soll": None if soll is None else [round(soll[0], 2), round(soll[1], 2)]}
-        if found is not None:
-            mxy = g.to_board([found.mean(axis=0)], z=float(gm.get("height_mm", 36.0)))[0]
-            off = gm.get("offset_mm", [0.0, 90.0])
-            pen = (float(mxy[0] - off[0]), float(mxy[1] - off[1]))
-            rec.update(marker=[round(float(mxy[0]), 2), round(float(mxy[1]), 2)], pen=[round(pen[0], 2), round(pen[1], 2)],
-                       corners=found.tolist())
-            if soll is not None:
-                dev = math.hypot(pen[0] - soll[0], pen[1] - soll[1])
-                rec["dev_mm"] = round(dev, 2)
-                self.history.append((f.t, pen[0], pen[1], soll[0], soll[1]))
-                self.history = self.history[-600:]
-                self._maybe_warn(dev)
-        self.track = rec
-        self.m._emit({"type": "camera", "data": rec})
-        return f.seq
-
-    def _maybe_warn(self, dev: float) -> None:
-        warn = float(self.settings["tracking"]["warn_mm"])
-        ms, _ = self.m.machine_state()
-        if dev > warn and ms == "idle" and time.time() - self._last_warn > 30.0:
-            self._last_warn = time.time()
-            self.m.log("warn", f"Kamera: die Gondel steht {dev:.1f} mm neben der Soll-Position "
-                               "(Riemen übersprungen? Referenz falsch? Marker-Versatz einlernen?).")
-
-    def learn_offset(self) -> dict:
-        """Marker-to-pen offset from the current pose (machine idle, reference set)."""
-        if self.m.mapping is None:
-            raise MachineError("Erst die Referenz setzen.", "no_reference")
-        tr, soll = self.track, self.m.phys_xy()
-        if not tr or not tr.get("marker") or time.time() - tr["t"] > 2.0:
-            raise MachineError("Der Gondel-Marker ist gerade nicht zu sehen.", "not_found", 422)
-        off = [round(tr["marker"][0] - soll[0], 2), round(tr["marker"][1] - soll[1], 2)]
-        with self._lock:
-            self.settings["markers"]["gondola"]["offset_mm"] = off
-            self._save()
-            self.history.clear()
-        return {"offset_mm": off}
-
-    def estimate_latency(self) -> dict:
-        """Camera delay: shift of the software trajectory that best matches the tracked one."""
-        h = np.asarray(self.history[-300:], float)
-        if len(h) < 20 or np.ptp(h[:, 3]) + np.ptp(h[:, 4]) < 50:
-            raise MachineError("Zu wenig Bewegung aufgezeichnet: erst die Gondel ein paar Mal fahren lassen.", "bad_request", 400)
-        t = h[:, 0]
-        best = (math.inf, 0.0)
-        for lag in np.arange(0.0, 1.01, 0.02):
-            sx = np.interp(t - lag, t, h[:, 3])
-            sy = np.interp(t - lag, t, h[:, 4])
-            ok = t - lag >= t[0]
-            e = float(np.median(np.hypot(h[ok, 1] - sx[ok], h[ok, 2] - sy[ok]))) if ok.sum() > 10 else math.inf
-            best = min(best, (e, float(lag)))
-        with self._lock:
-            self.settings["latency_ms"] = round(best[1] * 1000.0)
-            self._save()
-        return {"latency_ms": self.settings["latency_ms"], "median_mm": round(best[0], 2)}
-
     # ------------------------------------------------------------------ images
-    def jpeg(self, view: str = "raw", width: int | None = None, quality: int = 80, overlay: bool = False) -> tuple[bytes, dict]:
+    def jpeg(self, view: str = "raw", width: int | None = None, quality: int = 80, overlay: bool = False,
+             hide_people: bool | None = None) -> tuple[bytes, dict]:
         img, t, seq = self.frame()
-        key = (seq, view, width, quality, overlay)
+        if hide_people is None:
+            hide_people = bool(self.settings["people"]["filter"])
+        key = (seq, view, width, quality, overlay, hide_people)
         meta = {"seq": seq, "t": t}
         hit = self._jpeg_cache.get(key)
         if hit is not None:
             return hit, meta
+        if hide_people and self.presence.present:
+            img = self.presence.filtered(img)       # "see-through" person: remembered background instead
         if view == "board":
             g = self.geometry()
             img = g.rectify(img, self.view_rect(), float(self.settings["view"]["px_per_mm"]))
         elif view != "raw":
-            raise MachineError("Ansicht muss raw oder board sein.", "bad_request", 400)
+            raise MachineError("View must be raw or board.", "bad_request", 400)
         if overlay:
             from .overlay import draw_overlay
             img = draw_overlay(self, img, view)
@@ -459,7 +389,7 @@ class CameraService:
             img = cv2.resize(img, (int(width), max(1, int(img.shape[0] * k))), interpolation=cv2.INTER_AREA)
         ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, int(max(30, min(95, quality)))])
         if not ok:
-            raise MachineError("Bild konnte nicht kodiert werden.", "internal", 500)
+            raise MachineError("Picture could not be encoded.", "internal", 500)
         data = buf.tobytes()
         if len(self._jpeg_cache) > 12:
             self._jpeg_cache.clear()
@@ -473,5 +403,22 @@ class CameraService:
         out = {"settings": copy.deepcopy(self.settings), "source": src.info() if src else None,
                "calibrated": g is not None, "geometry": g.to_json() if g else None, "geometry_error": self.geom_error,
                "view_rect": list(rect), "lens_views": len(self.lens_views), "track": self.track,
+               "watch": self.watch_state, "presence": self.presence.state, "queued": bool(self._queued), "queued_count": len(self._queued),
                "coverage": g.coverage((0.0, 0.0, self.m.cfg.board.width_mm, self.m.cfg.board.height_mm)) if g else []}
         return out
+
+
+def _board_hint(img: np.ndarray) -> str:
+    """Why the board was not found, in words a user can act on."""
+    g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    mean, sat = float(g.mean()), float((g > 250).mean())
+    if mean < 8 or float(g.std()) < 3:
+        why = "the picture is black or empty (wrong camera? lens cap?)"
+    elif mean < 45:
+        why = "the picture is too dark"
+    elif sat > 0.25:
+        why = "the picture is overexposed (bright light or a window behind the board?)"
+    else:
+        why = "no closed board frame was found: all four edges and corners must be in view and not covered"
+    return f"Board not found: {why}. You can also mark the four corners by hand."
+

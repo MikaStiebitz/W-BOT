@@ -1,35 +1,31 @@
-// Einstiegspunkt: baut die Oberfläche, startet WebSocket und Startdaten, Tastenkürzel, Reiter.
+// Entry point: builds the UI, starts the WebSocket and the initial data, keyboard shortcuts, tabs.
 import { h } from './util.js';
 import { store, persist } from './store.js';
 import { api, startWs } from './api.js';
 import { reportError } from './ui.js';
 import { mountHeader, triggerEstop } from './panels/header.js';
 import { mountBoard, pushTrace } from './board.js';
+import { mountDraw } from './panels/draw.js';
+import { mountPens } from './panels/pens.js';
+import { mountSetup } from './panels/setup.js';
 import { mountJog } from './panels/jog.js';
-import { mountServo } from './panels/servo.js';
-import { mountPatterns } from './panels/patterns.js';
-import { mountCalibration } from './panels/calibration.js';
-import { mountCamera } from './panels/camera.js';
-import { mountSimulator } from './panels/simulator.js';
-import { mountConsole } from './panels/console.js';
-import { mountSettings } from './panels/settings.js';
+import { mountMore } from './panels/more.js';
+import { refreshCamera } from './camera.js';
+import { initSliders } from './sliderfx.js';
 
 const TABS = [
-  { id: 'fahren', label: 'Fahren', mount: mountJog },
-  { id: 'servo', label: 'Servos', mount: mountServo },
-  { id: 'bilder', label: 'Testbilder', mount: mountPatterns },
-  { id: 'kalib', label: 'Kalibrieren', mount: mountCalibration },
-  { id: 'kamera', label: 'Kamera', mount: mountCamera },
-  { id: 'sim', label: 'Simulator', mount: mountSimulator, when: (s) => s?.connection?.transport === 'sim' && s.connection.status === 'connected' },
-  { id: 'konsole', label: 'Konsole', mount: mountConsole },
-  { id: 'einst', label: 'Einstellungen', mount: mountSettings },
+  { id: 'draw', label: 'Draw', mount: mountDraw },
+  { id: 'pens', label: 'Pens', mount: mountPens },
+  { id: 'setup', label: 'Setup', mount: mountSetup },
+  { id: 'fahren', label: 'Move', mount: mountJog },     // id kept: the jog panel listens for it
+  { id: 'more', label: 'More', mount: mountMore },
 ];
 
-/* ---------- Fehler nie unbehandelt lassen ---------- */
+/* ---------- Never leave an error unhandled ---------- */
 window.addEventListener('unhandledrejection', (e) => { e.preventDefault(); reportError(e.reason); });
 window.addEventListener('error', (e) => { console.error(e.error || e.message); });
 
-/* ---------- Reiter ---------- */
+/* ---------- Tabs ---------- */
 function mountTabs() {
   const tabs = document.getElementById('tabs'), panels = document.getElementById('panels');
   const btns = {}, bodies = {};
@@ -39,7 +35,7 @@ function mountTabs() {
     const p = h('div', { class: 'panel', role: 'tabpanel', id: `panel-${t.id}`, 'aria-labelledby': `tab-${t.id}`, hidden: true });
     btns[t.id] = b; bodies[t.id] = p;
     tabs.append(b); panels.append(p);
-    try { t.mount(p); } catch (e) { console.error('Panel ' + t.id + ' fehlgeschlagen', e); p.append(h('div', { class: 'note danger' }, `Bereich „${t.label}“ konnte nicht geladen werden: ${e.message}`)); }
+    try { t.mount(p); } catch (e) { console.error('Panel ' + t.id + ' failed', e); p.append(h('div', { class: 'note danger' }, `The “${t.label}” tab could not be loaded: ${e.message}`)); }
   }
   function select(id) {
     const t = TABS.find((x) => x.id === id && (!x.when || x.when(store.get('state')))) ?? TABS[0];
@@ -56,7 +52,7 @@ function mountTabs() {
     for (const t of TABS) btns[t.id].hidden = !!t.when && !t.when(st);
     let cur = store.get('tab');
     if (panels._cur !== cur) { panels._cur = cur; panels.scrollTop = 0; }
-    if (!TABS.some((t) => t.id === cur && !btns[t.id].hidden)) { cur = 'fahren'; }   // gemerkten Reiter behalten, bis er wieder verfügbar ist
+    if (!TABS.some((t) => t.id === cur && !btns[t.id].hidden)) { cur = 'draw'; store.set({ tab: cur }); }
     for (const t of TABS) {
       const on = t.id === cur;
       btns[t.id].setAttribute('aria-selected', String(on)); btns[t.id].tabIndex = on ? 0 : -1;
@@ -66,7 +62,7 @@ function mountTabs() {
   persist('wbot-tab', 'tab');
 }
 
-/* ---------- WebSocket-Nachrichten ---------- */
+/* ---------- WebSocket messages ---------- */
 function pushLog(rec) {
   const logs = store.get('logs'), n = store.get('logSeq') + 1;
   logs.push({ n, level: rec.level || 'info', text: String(rec.text ?? ''), t: rec.t });
@@ -90,7 +86,7 @@ async function loadSimTrace() {
     const info = await api.simulator({ quiet: true });
     if (info?.trace) { const t = store.get('trace'); t.length = 0; t.push(...info.trace); store.touch('trace'); }
     store.set({ simInfo: info });
-  } catch { /* nicht kritisch */ }
+  } catch { /* not critical */ }
 }
 
 function onMessage(msg) {
@@ -100,6 +96,8 @@ function onMessage(msg) {
     case 'job': store.set({ job: msg.data }); break;
     case 'camera': store.set({ camTrack: msg.data }); break;
     case 'autocal': store.set({ autocal: msg.data }); break;
+    case 'presence': store.set({ presence: msg.data }); break;
+    case 'camera_watch': refreshCamera(); break;
     case 'trace': {
       const d = msg.data || {};
       if (d.clear) { store.get('trace').length = 0; store.touch('trace'); }
@@ -124,7 +122,7 @@ async function refreshAll(first = false) {
   if (ports.status === 'fulfilled' && Array.isArray(ports.value)) store.set({ ports: ports.value });
 }
 
-/* ---------- Tastatur: Not-Halt auf Leertaste ---------- */
+/* ---------- Keyboard: emergency stop on the space bar ---------- */
 const textEntry = (t) => !!t && (t.tagName === 'TEXTAREA' || t.isContentEditable || (t.tagName === 'INPUT' && ['text', 'search', 'url', 'email', 'password', 'tel'].includes(t.type)));
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Escape') store.set({ target: null });
@@ -135,6 +133,7 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => { if (e.code === 'Space' && !textEntry(e.target)) { e.preventDefault(); e.stopPropagation(); } }, true);
 
 /* ---------- Start ---------- */
+initSliders();
 mountHeader(document.getElementById('top'));
 mountBoard(document.getElementById('board-col'));
 mountTabs();

@@ -23,7 +23,7 @@ from .drawing import Drawing, Stroke, clean
 
 
 class SvgError(ValueError):
-    """The SVG cannot be imported (message is German, shown to the user)."""
+    """The SVG cannot be imported (message is shown to the user)."""
 
 
 @dataclass
@@ -54,7 +54,7 @@ _NAMED = {"black": "#000000", "white": "#ffffff", "red": "#ff0000", "green": "#0
 _NUM = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
 _SKIP = {"defs", "clipPath", "mask", "symbol", "metadata", "title", "desc", "style", "marker", "pattern",
          "linearGradient", "radialGradient", "filter"}
-_WARN_TAGS = {"text": "Text", "image": "Bilder", "use": "'use'-Verweise", "style": "CSS-Stile"}
+_WARN_TAGS = {"text": "text elements", "image": "images", "use": "'use' references", "style": "CSS styles"}
 _CMD_ARGS = {"M": 2, "L": 2, "H": 1, "V": 1, "C": 6, "S": 4, "Q": 4, "T": 2, "A": 7, "Z": 0}
 
 
@@ -148,7 +148,7 @@ def _tokens(d: str):
         else:
             m = _NUM.match(d, i)
             if not m:
-                raise SvgError(f"Ungültige Pfaddaten bei Zeichen {i}")
+                raise SvgError(f"Invalid path data at character {i}")
             yield m.group(0)
             i = m.end()
 
@@ -226,16 +226,16 @@ def _parse_path(d: str) -> list[tuple[list, bool]]:
                 cmd = None
                 continue
         elif cmd is None:
-            raise SvgError("Pfaddaten beginnen ohne Befehl")
+            raise SvgError("Path data starts without a command")
         up, rel = cmd.upper(), cmd.islower()
         if up not in _CMD_ARGS:
-            raise SvgError(f"Unbekannter Pfadbefehl '{cmd}'")
+            raise SvgError(f"Unknown path command '{cmd}'")
         nargs = _CMD_ARGS[up]
         if up == "A":
             vals = []
             for k in range(7):
                 if i >= len(toks):
-                    raise SvgError("Pfaddaten unvollständig")
+                    raise SvgError("Path data incomplete")
                 s = toks[i]
                 if k in (3, 4) and len(s) > 1 and s[0] in "01":
                     vals.append(float(s[0]))        # compact flags: "a1 1 0 00.5.5"
@@ -245,11 +245,11 @@ def _parse_path(d: str) -> list[tuple[list, bool]]:
                     i += 1
         else:
             if i + nargs > len(toks):
-                raise SvgError("Pfaddaten unvollständig")
+                raise SvgError("Path data incomplete")
             try:
                 vals = [float(x) for x in toks[i:i + nargs]]
             except ValueError:
-                raise SvgError("Ungültige Zahl in Pfaddaten") from None
+                raise SvgError("Invalid number in path data") from None
             i += nargs
         ox, oy = (cur[0], cur[1]) if rel else (0.0, 0.0)
         if up == "M":
@@ -383,15 +383,15 @@ def import_svg(data: bytes | str, cfg: Config | None = None, opts: SvgOptions | 
     opts = opts or SvgOptions()
     raw = data.encode("utf-8") if isinstance(data, str) else bytes(data)
     if len(raw) > opts.max_bytes:
-        raise SvgError(f"SVG-Datei zu groß ({len(raw) / 1e6:.1f} MB, erlaubt {opts.max_bytes / 1e6:.0f} MB)")
+        raise SvgError(f"SVG file too large ({len(raw) / 1e6:.1f} MB, allowed {opts.max_bytes / 1e6:.0f} MB)")
     if re.search(rb"<!ENTITY|<!DOCTYPE[^>]*\[", raw, re.I):
-        raise SvgError("SVG mit DOCTYPE-Entitäten wird aus Sicherheitsgründen abgelehnt")
+        raise SvgError("SVG with DOCTYPE entities is rejected for security reasons")
     try:
         root = ET.fromstring(raw)
     except ET.ParseError as e:
-        raise SvgError(f"Keine gültige SVG-Datei: {e}") from None
+        raise SvgError(f"Not a valid SVG file: {e}") from None
     if _tag(root) != "svg":
-        raise SvgError("Keine SVG-Datei (Wurzelelement ist nicht <svg>)")
+        raise SvgError("Not an SVG file (root element is not <svg>)")
     warnings: list[str] = []
 
     vb = [float(x) for x in _NUM.findall(root.get("viewBox") or "")]
@@ -404,7 +404,7 @@ def import_svg(data: bytes | str, cfg: Config | None = None, opts: SvgOptions | 
                          [0, s, (h_mm - s * vb[3]) / 2 - s * vb[1]], [0, 0, 1.0]])
     else:
         if not w_mm or not h_mm:
-            raise SvgError("SVG ohne viewBox und ohne Breite/Höhe kann nicht skaliert werden")
+            raise SvgError("An SVG without a viewBox and without width/height cannot be scaled")
         # no viewBox: one user unit == the unit of the width attribute (px if none)
         m_unit = re.search(r"([a-z]+)\s*$", (root.get("width") or "").strip())
         f = _UNITS.get(m_unit.group(1), _UNITS["px"]) if m_unit else _UNITS["px"]
@@ -449,7 +449,7 @@ def import_svg(data: bytes | str, cfg: Config | None = None, opts: SvgOptions | 
         if tag in _WARN_TAGS:
             if tag not in warned:
                 warned.add(tag)
-                warnings.append(f"{_WARN_TAGS[tag]} werden nicht importiert")
+                warnings.append(f"{_WARN_TAGS[tag]} are not imported")
             return
         subs = _shape_path(e, tag)
         if subs is None:
@@ -463,12 +463,12 @@ def import_svg(data: bytes | str, cfg: Config | None = None, opts: SvgOptions | 
         for pts, closed in _flatten(subs, mm, opts.tolerance_mm):
             npts += len(pts)
             if npts > opts.max_points:
-                raise SvgError(f"SVG hat zu viele Punkte (mehr als {opts.max_points})")
+                raise SvgError(f"SVG has too many points (more than {opts.max_points})")
             strokes.append(Stroke(pts, col))
 
     walk(root, root_m, {})
     if not strokes:
-        warnings.append("Die SVG-Datei enthält keine zeichenbaren Linien")
+        warnings.append("The SVG file contains no drawable lines")
     return SvgImport(clean(Drawing(strokes, name)), float(w_mm), float(h_mm), warnings)
 
 

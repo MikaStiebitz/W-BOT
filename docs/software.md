@@ -14,7 +14,19 @@ Python host (FastAPI) + web UI, no build step. Talks to **FluidNC v3.9.9** on th
 .venv\Scripts\python.exe -m pytest                                    # tests, no hardware needed
 ```
 
-The UI starts in the **simulator**; real hardware only opens on request. (UI text is currently German.)
+The UI starts in the **simulator**; real hardware only opens on request (gear button in the header).
+
+| Tab | What it does |
+|---|---|
+| **Draw** | Drop (or paste, or browse) a PNG, JPEG, WebP or SVG. Images are traced into pen paths and previewed on the board exactly as they will be plotted. *Style*: auto, lines (centre lines), outline, fill (hatching with the pen width). *Detail* sets resolution and precision; *Use all pen colours* splits the image over the pens. Samples are under "Or try a sample". |
+| **Pens** | Interactive 3D revolver. Colour, name and line width of every pen; the width is used for the preview, the hatching and the sample stroke. |
+| **Setup** | One click: connect, find the camera picture, the whiteboard and the motors, and set the gondola position (in the simulator it is known; on real hardware the camera finds where the belts meet, or you click the gondola on the board). Measured motor positions are applied only after you confirm. |
+| **Move** | Jog, go to a point, park, pen up/down, position reference. |
+| **More** | Camera (markers, lens, guard), calibration with measured crosses, servo tests, simulator error injection, console, settings. |
+
+**Live draw** (button on the board toolbar): draw on the board with mouse or finger; the strokes are queued and the plotter follows with a lag (speed slider, Stop and Clear in the strip over the board).
+
+Errors appear as one dismissible notice per cause. Image upload API: `POST /api/import` (multipart `file` + JSON `options`: `mode`, `detail`, `invert`, `use_pen_colors`, `pen`).
 
 ## Why it is accurate
 
@@ -73,3 +85,4 @@ An MCP server lets an AI assistant preview and draw shapes, text and SVG through
 | `wbot/camera/`, `camera_api.py` | camera support |
 | `wbot/mcp_*.py` | MCP server |
 | `wbot/api/`, `ui/` | REST/WebSocket API, web UI |
+| `wbot/imagetrace.py` | Raster image to pen paths (PNG, JPEG, ...) |

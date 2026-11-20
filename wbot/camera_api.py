@@ -3,11 +3,17 @@
     GET    /api/camera                      -> info (settings, source, geometry, coverage, track)
     PUT    /api/camera {patch}              -> info   (source, rotate, mirror, markers, tracking, view, line_mm, latency_ms)
     GET    /api/camera/devices              -> [{index, size, backend, thumb (data URL)}]   (slow: probes devices)
-    GET    /api/camera/frame.jpg?view=raw|board&w=&q=&overlay=0|1   -> image/jpeg (X-Frame-Seq, X-Frame-T)
+    GET    /api/camera/frame.jpg?view=raw|board&w=&q=&overlay=0|1&hide=0|1 -> image/jpeg (hide: person filtered out)
     GET    /api/camera/suggest-board        -> {image_points, board_points, image_size}  (not applied)
     POST   /api/camera/calibrate {image_points, board_points, method?} -> {rms_px, rms_mm, warnings, coverage}
     POST   /api/camera/calibrate/markers    -> same + {markers, missing}
     DELETE /api/camera/calibrate            -> info
+    POST   /api/camera/auto-setup?pick_camera=1 -> {camera, board (applied), motors (measured, not applied), errors}
+    GET    /api/camera/motors/suggest       -> {image_points, board_points}  (motor bodies, not applied)
+    POST   /api/camera/gondola/locate {apply?} -> {pen, belts, contrast, ok, error?} (+ state when applied as reference)
+    GET    /api/drawing-area/suggest        -> {rect, margins} largest usable area for the configured anchors
+    POST   /api/camera/anchors {left:[u,v], right:[u,v], z_mm?, apply?} -> measured anchors vs config (+ config)
+    POST   /api/camera/queue-job {job body}  -> {queued}  (starts once nobody stands at the board) ; DELETE cancels
     POST   /api/camera/lens/capture {cols, rows} | /lens/compute {square_mm} ; DELETE /api/camera/lens
     POST   /api/camera/track/learn-offset   -> {offset_mm} ;  POST /api/camera/track/latency -> {latency_ms}
     POST   /api/camera/measure {targets, arm_mm, frames?} -> {points:[{target, measured|null, status, ...}], ...}
@@ -38,9 +44,9 @@ def _pts(v: Any, what: str, n_min: int = 1) -> list[list[float]]:
     try:
         out = [[float(p[0]), float(p[1])] for p in v]
     except (TypeError, ValueError, IndexError, KeyError):
-        raise MachineError(f"{what}: erwartet eine Liste von [x, y].", "bad_request", 400) from None
+        raise MachineError(f"{what}: expected a list of [x, y].", "bad_request", 400) from None
     if len(out) < n_min or not all(math.isfinite(a) and math.isfinite(b) and abs(a) < MAX_MM and abs(b) < MAX_MM for a, b in out):
-        raise MachineError(f"{what}: zu wenige oder ungültige Punkte.", "bad_request", 400)
+        raise MachineError(f"{what}: too few or invalid points.", "bad_request", 400)
     return out
 
 
@@ -49,15 +55,15 @@ def markers_svg(svc: CameraService) -> str:
     from .camera.detect import marker_image
     mk = svc.settings["markers"]
     items = [(int(b["id"]), float(b.get("size_mm", mk["size_mm"])),
-              f"Tafel-Marker {b['id']}: Mitte bei x {b['x']:g} | y {b['y']:g} mm, Oberkante nach oben") for b in mk["board"]]
+              f"Board marker {b['id']}: centre at x {b['x']:g} | y {b['y']:g} mm, top edge up") for b in mk["board"]]
     g = mk.get("gondola") or {}
     if g.get("enabled", True):
-        items.append((int(g.get("id", 10)), float(g.get("size_mm", 50.0)), f"Gondel-Marker {g.get('id', 10)}: vorn auf die Gondel"))
+        items.append((int(g.get("id", 10)), float(g.get("size_mm", 50.0)), f"Gondola marker {g.get('id', 10)}: on the front of the gondola"))
     bits = {"4X4_50": 4, "5X5_100": 5, "6X6_250": 6}[mk["dict"]] + 2
     parts = ['<svg xmlns="http://www.w3.org/2000/svg" width="210mm" height="297mm" viewBox="0 0 210 297">',
              '<rect width="210" height="297" fill="#fff"/>',
-             '<text x="105" y="12" font-size="5" text-anchor="middle" font-family="sans-serif">W-BOT Kamera-Marker - '
-             'in Originalgröße drucken (100 %, nicht anpassen)</text>']
+             '<text x="105" y="12" font-size="5" text-anchor="middle" font-family="sans-serif">W-BOT camera markers - '
+             'print at original size (100 %, no scaling)</text>']
     for k, (mid, size, label) in enumerate(items[:6]):
         cx, cy = 55 + (k % 2) * 100, 55 + (k // 2) * 88
         img = marker_image(mid, bits * 10, mk["dict"])
@@ -94,13 +100,13 @@ def register_camera_routes(app: FastAPI, m, svc: CameraService) -> None:
     @app.get("/api/camera/devices")
     async def cam_devices(max_index: int = 6):
         from .camera.sources import probe_devices
-        devs = await run(probe_devices, max(1, min(int(max_index), 10)))
+        devs = await run(probe_devices, max(1, min(int(max_index), 10)), 240, svc.devices_in_use())
         return [{**{k: v for k, v in d.items() if k != "thumb"},
                  "thumb": "data:image/jpeg;base64," + base64.b64encode(d["thumb"]).decode()} for d in devs]
 
     @app.get("/api/camera/frame.jpg")
-    async def cam_frame(view: str = "raw", w: int | None = None, q: int = 75, overlay: int = 0):
-        data, meta = await run(svc.jpeg, view, w, q, bool(overlay))
+    async def cam_frame(view: str = "raw", w: int | None = None, q: int = 75, overlay: int = 0, hide: int | None = None):
+        data, meta = await run(svc.jpeg, view, w, q, bool(overlay), None if hide is None else bool(hide))
         return Response(data, media_type="image/jpeg", headers={"Cache-Control": "no-store", "X-Frame-Seq": str(meta["seq"]),
                                                                   "X-Frame-T": f"{meta['t']:.3f}"})
 
@@ -121,6 +127,36 @@ def register_camera_routes(app: FastAPI, m, svc: CameraService) -> None:
     @app.delete("/api/camera/calibrate")
     async def cam_calibrate_clear():
         return await run(svc.clear_calibration)
+
+    @app.post("/api/camera/auto-setup")
+    async def cam_auto_setup(pick_camera: int = 1):
+        return await run(svc.auto_setup, bool(pick_camera))
+
+    @app.get("/api/drawing-area/suggest")
+    async def drawing_area():
+        from .drawarea import suggest_area
+
+        def go():
+            try:
+                return suggest_area(m.cfg)
+            except ValueError as exc:
+                raise MachineError(str(exc), "not_found", 422) from exc
+        return await run(go)
+
+    @app.post("/api/camera/gondola/locate")
+    async def cam_gondola(body: dict[str, Any] | None = None):
+        return await run(svc.locate_gondola, bool((body or {}).get("apply")))
+
+    @app.get("/api/camera/motors/suggest")
+    async def cam_motors():
+        return await run(svc.suggest_motors)
+
+    @app.post("/api/camera/anchors")
+    async def cam_anchors(body: dict[str, Any]):
+        pts = _pts([body.get("left"), body.get("right")], "left/right")
+        z = body.get("z_mm")
+        fn = svc.apply_anchors if body.get("apply") else svc.measure_anchors
+        return await run(fn, pts[0], pts[1], None if z is None else float(z))
 
     @app.post("/api/camera/lens/capture")
     async def cam_lens_capture(body: dict[str, Any] | None = None):
@@ -149,9 +185,9 @@ def register_camera_routes(app: FastAPI, m, svc: CameraService) -> None:
         try:
             arm = float(body.get("arm_mm", 20.0))
         except (TypeError, ValueError):
-            raise MachineError("arm_mm muss eine Zahl sein.", "bad_request", 400) from None
+            raise MachineError("arm_mm must be a number.", "bad_request", 400) from None
         if not 2.0 <= arm <= 40.0:
-            raise MachineError("arm_mm muss zwischen 2 und 40 mm liegen.", "bad_request", 400)
+            raise MachineError("arm_mm must be between 2 and 40 mm.", "bad_request", 400)
         return await run(measure_crosses, svc, tg, arm, frames=int(body.get("frames", 6)))
 
     @app.post("/api/camera/autocal")
@@ -165,6 +201,14 @@ def register_camera_routes(app: FastAPI, m, svc: CameraService) -> None:
     @app.post("/api/camera/autocal/cancel")
     async def cam_autocal_cancel():
         return await run(auto.cancel)
+
+    @app.post("/api/camera/queue-job")
+    async def cam_queue(body: dict[str, Any]):
+        return await run(svc.queue_job, body)
+
+    @app.delete("/api/camera/queue-job")
+    async def cam_unqueue():
+        return await run(svc.cancel_queue)
 
     @app.get("/api/camera/markers.svg")
     async def cam_markers():
@@ -184,20 +228,20 @@ def register_camera_routes(app: FastAPI, m, svc: CameraService) -> None:
         from .calibration_tape import fit_distances
         raw = body.get("pairs")
         if not isinstance(raw, list) or not raw:
-            raise MachineError("Keine Abstände übergeben ('pairs').", "bad_request", 400)
+            raise MachineError("No distances given ('pairs').", "bad_request", 400)
         pairs = []
         for i, p in enumerate(raw, 1):
             if not isinstance(p, dict):
-                raise MachineError(f"Abstand {i}: Objekt mit a, b, measured_mm erwartet.", "bad_request", 400)
-            a, b = _pts([p.get("a")], f"Abstand {i} a")[0], _pts([p.get("b")], f"Abstand {i} b")[0]
+                raise MachineError(f"Distance {i}: object with a, b, measured_mm expected.", "bad_request", 400)
+            a, b = _pts([p.get("a")], f"Distance {i} a")[0], _pts([p.get("b")], f"Distance {i} b")[0]
             try:
                 d = float(p.get("measured_mm"))
             except (TypeError, ValueError):
-                raise MachineError(f"Abstand {i}: measured_mm fehlt.", "bad_request", 400) from None
+                raise MachineError(f"Distance {i}: measured_mm missing.", "bad_request", 400) from None
             pairs.append((tuple(a), tuple(b), d))
         free = body.get("free")
         if free is not None and (not isinstance(free, list) or not all(isinstance(f, str) for f in free)):
-            raise MachineError("'free' muss eine Liste von Parameternamen sein.", "bad_request", 400)
+            raise MachineError("'free' must be a list of parameter names.", "bad_request", 400)
         ref, ref_fw = _reference(m)
         try:
             return fit_distances(m.cfg, ref, ref_fw, pairs, free)

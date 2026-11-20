@@ -159,7 +159,7 @@ def test_revolver_disabled_omits_axis_with_explanation():
     d = _parse(text)
     assert "a" not in d["axes"] and "z" in d["axes"]
     assert "NO_PIN" not in yaml.safe_dump(d)                         # never a pinless servo
-    assert "ENTFERNT" in text and "error:9" in text
+    assert "REMOVED" in text and "error:9" in text
     assert "gpio.32" not in yaml.safe_dump(d)
 
 
@@ -204,7 +204,7 @@ def test_verify_wrong_kinematics_name_is_flagged():
         d["kinematics"] = {"wall_plotter": d["kinematics"]["WallPlotter"]}
     issues = verify_dump(CFG, _dump_of(mutate=mut))
     assert "kinematics" in _errors(issues)
-    assert "kartesisch" in next(i for i in issues if i.key == "kinematics").message_de
+    assert "Cartesian" in next(i for i in issues if i.key == "kinematics").message_de
     assert verify_dump(CFG, _dump_of(mutate=lambda d: d.pop("kinematics")))[0].key == "kinematics"
 
 

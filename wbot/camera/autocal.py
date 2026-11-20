@@ -8,12 +8,11 @@ reported as such instead of being measured badly.
 ``AutoCalibration``: draw the cross grid -> move the gondola to two places in turn (left, right) and
 measure each cross from the view where it is least occluded -> the existing geometry fit
 (``calibration.fit_geometry``). It never applies anything: the UI shows the result and the user
-applies it with the normal "Korrektur übernehmen" (POST /api/calibration/apply).
+applies it with the normal "apply correction" (POST /api/calibration/apply).
 """
 from __future__ import annotations
 
 import logging
-import math
 import threading
 import time
 from typing import TYPE_CHECKING, Any
@@ -77,15 +76,15 @@ def measure_crosses(svc: "CameraService", targets, arm_mm: float, *, frames: int
         clr = clearance(svc.m.cfg, (tx, ty), pen)
         rec["clearance_mm"] = round(clr, 1) if clr < 1e5 else None
         if area is None or not area.buffer(-half).contains(Point(tx, ty)):
-            rec["status"] = "außerhalb"
+            rec["status"] = "outside"
         elif clr < arm:
-            rec["status"] = "verdeckt"
+            rec["status"] = "hidden"
         else:
             r = (tx - half, ty - half, tx + half, ty + half)
             crop = g.rectify(img, r, s, border=(255, 255, 255))
             hit = detect.find_cross(crop, (half * s, half * s), arm * s, line_mm * s, search * s)
             if hit is None:
-                rec["status"] = "nicht gefunden"
+                rec["status"] = "not_found"
             else:
                 mx, my = r[0] + (hit.x + 0.5) / s, r[3] - (hit.y + 0.5) / s
                 rec.update(measured=[round(mx, 3), round(my, 3)], score=round(hit.score, 3),
@@ -94,11 +93,11 @@ def measure_crosses(svc: "CameraService", targets, arm_mm: float, *, frames: int
     found = sum(1 for p in points if p["measured"])
     warnings = []
     if worst_res > 2.5:
-        warnings.append(f"Die Kamera löst an manchen Punkten nur {worst_res:.1f} mm pro Pixel auf: näher heran oder "
-                        "höhere Auflösung, sonst ist die Messung ungenau.")
-    miss = [i + 1 for i, p in enumerate(points) if p["status"] in ("nicht gefunden",)]
+        warnings.append(f"At some points the camera only resolves {worst_res:.1f} mm per pixel: move it closer or use "
+                        "a higher resolution, otherwise the measurement is inaccurate.")
+    miss = [i + 1 for i, p in enumerate(points) if p["status"] == "not_found"]
     if miss:
-        warnings.append("Nicht gefunden: Kreuz " + ", ".join(map(str, miss)) + " (gezeichnet? Belichtung? Liniendicke?).")
+        warnings.append("Not found: cross " + ", ".join(map(str, miss)) + " (drawn? exposure? line width?).")
     return {"points": points, "found": found, "total": len(points), "warnings": warnings,
             "rms_px": g.rms_px, "homography_rms_mm": g.rms_mm}
 
@@ -140,17 +139,17 @@ class AutoCalibration:
 
     def start(self, body: dict) -> dict:
         if self.running:
-            raise MachineError("Die Kamera-Kalibrierung läuft schon.", "busy", 409)
+            raise MachineError("The camera calibration is already running.", "busy", 409)
         self.svc.geometry()
         if self.m.mapping is None:
-            raise MachineError("Erst die Referenz setzen.", "no_reference")
+            raise MachineError("Set the reference first.", "no_reference")
         from ..calibration_api import calibration_targets
         nx, ny, inset = int(body.get("n_x", 5)), int(body.get("n_y", 4)), float(body.get("inset_mm", 20.0))
         tg = calibration_targets(self.m, nx, ny, inset)
         if "pattern" not in tg:
-            raise MachineError("Mit diesen Einstellungen lassen sich keine Messkreuze zeichnen (Armlänge 2-20 mm).", "bad_request", 400)
+            raise MachineError("These settings cannot draw measuring crosses (arm length 2-20 mm).", "bad_request", 400)
         self._cancel.clear()
-        self.state = {"state": "starting", "targets": tg["targets"], "arm_mm": inset, "step": "Start", "progress": 0.0}
+        self.state = {"state": "starting", "targets": tg["targets"], "arm_mm": inset, "step": "Starting", "progress": 0.0}
         args = (tg, bool(body.get("draw", True)), body.get("free"))
         self._thread = threading.Thread(target=self._run, args=args, name="camera-autocal", daemon=True)
         self._thread.start()
@@ -165,11 +164,11 @@ class AutoCalibration:
     def _wait_job(self) -> None:
         while True:
             if self._cancel.is_set():
-                raise MachineError("Abgebrochen.", "cancelled", 409)
+                raise MachineError("Cancelled.", "cancelled", 409)
             job = self.m.jobs.job if self.m.jobs else None
             if job and job["state"] not in ("planning", "running", "paused"):
                 if job["state"] != "done":
-                    raise MachineError(f"Zeichnen nicht fertig geworden ({job['state']}).", "job_failed", 409)
+                    raise MachineError(f"Drawing did not finish ({job['state']}).", "job_failed", 409)
                 return
             if job:
                 self._set(progress=0.05 + 0.6 * float(job.get("progress") or 0.0))
@@ -182,40 +181,40 @@ class AutoCalibration:
             if ms == "idle" and not self.m._cmd_lock.locked():
                 return
             if self._cancel.is_set():
-                raise MachineError("Abgebrochen.", "cancelled", 409)
+                raise MachineError("Cancelled.", "cancelled", 409)
             time.sleep(0.1)
-        raise MachineError("Die Maschine wird nicht fertig.", "timeout", 504)
+        raise MachineError("The machine does not finish.", "timeout", 504)
 
     def _run(self, tg: dict, draw: bool, free) -> None:
         targets, arm = tg["targets"], float(tg["pattern"]["params"]["arm_mm"])
         try:
             if draw:
-                self._set(state="drawing", step="Messkreuze zeichnen", progress=0.05)
-                self.m.start_job({"pattern": tg["pattern"], "name": "Messkreuze (Kamera)"})
+                self._set(state="drawing", step="Drawing crosses", progress=0.05)
+                self.m.start_job({"pattern": tg["pattern"], "name": "Measuring crosses (camera)"})
                 time.sleep(0.3)
                 self._wait_job()
             x0, y0, x1, y1 = self.m.cfg.safe_rect()
             spots = [(x0 + 0.12 * (x1 - x0), y1), (x0 + 0.88 * (x1 - x0), y1)]
             views = []
             for i, (sx, sy) in enumerate(spots):
-                self._set(state="measuring", step=f"Gondel zur Seite fahren ({i + 1}/2)", progress=0.7 + 0.1 * i)
+                self._set(state="measuring", step=f"Moving the gondola aside ({i + 1}/2)", progress=0.7 + 0.1 * i)
                 self._wait_idle()
                 self.m.goto(sx, sy, None, "up")
                 self._wait_idle()
                 time.sleep(0.6)                       # gondola swings out, camera latency
-                self._set(step=f"Kreuze messen ({i + 1}/2)")
+                self._set(step=f"Measuring crosses ({i + 1}/2)")
                 views.append(measure_crosses(self.svc, targets, arm, frames=8, pen=(sx, sy)))
             points = merge_views(views)
             meas = [{"target": p["target"], "measured": p["measured"]} for p in points if p["measured"]]
             warnings = sorted({w for v in views for w in v["warnings"]})
-            self._set(step="Geometrie anpassen", progress=0.9, points=points, warnings=warnings)
+            self._set(step="Fitting the geometry", progress=0.9, points=points, warnings=warnings)
             if len(meas) < 3:
-                raise MachineError(f"Nur {len(meas)} Kreuze erkannt - zu wenig für eine Auswertung.", "not_found", 422)
+                raise MachineError(f"Only {len(meas)} crosses found - too few to fit.", "not_found", 422)
             from ..calibration_api import calibration_fit
             result = calibration_fit(self.m, {"measurements": meas, "free": free})
-            self._set(state="done", step="Fertig", progress=1.0, result=result, measurements=meas)
+            self._set(state="done", step="Done", progress=1.0, result=result, measurements=meas)
         except MachineError as exc:
             self._set(state="error" if exc.code != "cancelled" else "cancelled", step=exc.message, error=exc.message)
         except Exception as exc:  # noqa: BLE001
             log.exception("auto calibration failed")
-            self._set(state="error", step=f"Interner Fehler: {exc}", error=str(exc))
+            self._set(state="error", step=f"Internal error: {exc}", error=str(exc))

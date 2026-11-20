@@ -85,9 +85,9 @@ def _resolve(host: str, port: int) -> list[tuple]:
     except socket.gaierror as exc:
         hint = ""
         if host.lower().endswith(".local"):
-            hint = (" mDNS-Namen (.local) werden nur aufgeloest, wenn der Rechner mDNS/Bonjour kann "
-                    "und Board und PC im selben Netz haengen - sonst die IP-Adresse des Boards verwenden.")
-        raise LinkError(f"Hostname '{host}' laesst sich nicht aufloesen ({exc}).{hint}") from exc
+            hint = (" mDNS names (.local) only resolve if the computer supports mDNS/Bonjour "
+                    "and the board and PC are on the same network - otherwise use the board's IP address.")
+        raise LinkError(f"Hostname '{host}' cannot be resolved ({exc}).{hint}") from exc
     infos.sort(key=lambda i: 0 if i[0] == socket.AF_INET else 1)    # the ESP32 is IPv4-only
     return infos
 
@@ -126,8 +126,8 @@ def open_socket(host: str, port: int, connect_timeout: float) -> socket.socket:
                     sock.close()
                 except OSError:
                     pass
-    raise LinkError(f"keine Verbindung zu {host}:{port} ({last}). Board eingeschaltet, im WLAN, "
-                    f"Telnet/WebSocket in FluidNC aktiv?") from last
+    raise LinkError(f"no connection to {host}:{port} ({last}). Is the board powered on, on the WiFi, "
+                    f"with Telnet/WebSocket enabled in FluidNC?") from last
 
 
 class TcpLink(Link):

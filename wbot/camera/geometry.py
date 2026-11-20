@@ -23,7 +23,7 @@ DEFAULT_FOCAL_FRAC = 0.75          # f / image width of a typical 70-78 deg webc
 
 
 class CameraGeometryError(ValueError):
-    """Bad correspondences (message is German, shown to the user)."""
+    """Bad correspondences (message is shown to the user)."""
 
 
 def _h(points) -> np.ndarray:
@@ -118,18 +118,18 @@ class BoardCamera:
         img = np.asarray(image_pts, float).reshape(-1, 2)
         brd = np.asarray(board_pts, float).reshape(-1, 2)
         if len(img) != len(brd) or len(img) < 4:
-            raise CameraGeometryError("Mindestens 4 Punktpaare (Bild und Tafel) nötig.")
+            raise CameraGeometryError("At least 4 point pairs (image and board) are needed.")
         if not (np.all(np.isfinite(img)) and np.all(np.isfinite(brd))):
-            raise CameraGeometryError("Ungültige Koordinaten.")
+            raise CameraGeometryError("Invalid coordinates.")
         und = undistort_px(img, K, dist)
         area = cv2.contourArea(cv2.convexHull(brd.astype(np.float32)))
         if area < 100.0 * 100.0:
-            raise CameraGeometryError("Die Tafelpunkte liegen zu dicht beieinander (mindestens 10 x 10 cm aufspannen).")
+            raise CameraGeometryError("The board points are too close together (span at least 10 x 10 cm).")
         if cv2.contourArea(cv2.convexHull(und.astype(np.float32))) < 400.0:
-            raise CameraGeometryError("Die Bildpunkte liegen zu dicht beieinander.")
+            raise CameraGeometryError("The image points are too close together.")
         H, _ = cv2.findHomography(brd, und, 0)
         if H is None or not np.all(np.isfinite(H)):
-            raise CameraGeometryError("Aus diesen Punkten lässt sich keine Entzerrung berechnen (Reihenfolge prüfen).")
+            raise CameraGeometryError("No mapping can be computed from these points (check their order).")
         cam = cls(H, (int(image_size[0]), int(image_size[1])), None if K is None else np.asarray(K, float),
                   None if dist is None else np.asarray(dist, float).ravel())
         proj = cam.to_image(brd)
@@ -137,7 +137,7 @@ class BoardCamera:
         cam.rms_px = float(np.sqrt(np.nanmean(np.sum((proj - img) ** 2, axis=1))))
         cam.rms_mm = float(np.sqrt(np.nanmean(np.sum((back - brd) ** 2, axis=1))))
         if not cam._orientation_ok(brd):
-            raise CameraGeometryError("Die Punkte sind vertauscht (Reihenfolge der Ecken prüfen).")
+            raise CameraGeometryError("The points are swapped (check the order of the corners).")
         return cam
 
     def _orientation_ok(self, brd: np.ndarray) -> bool:
@@ -172,10 +172,10 @@ class BoardCamera:
         return float(1.0 / math.sqrt(max(a * b, 1e-12)))
 
     # ------------------------------------------------------------------ rectification
-    def rectify_maps(self, rect: tuple[float, float, float, float], px_per_mm: float):
+    def rectify_maps(self, rect: tuple[float, float, float, float], px_per_mm: float, z: float = 0.0):
         """cv2.remap maps that turn the raw image into a top-down board view of ``rect``
         (x0, y0, x1, y1 mm; output row 0 = y1). Cached."""
-        key = (tuple(round(v, 3) for v in rect), round(px_per_mm, 4))
+        key = (tuple(round(v, 3) for v in rect), round(px_per_mm, 4), round(z, 2))
         if key in self._maps:
             return self._maps[key]
         x0, y0, x1, y1 = rect
@@ -183,7 +183,7 @@ class BoardCamera:
         xs = x0 + (np.arange(w) + 0.5) / px_per_mm
         ys = y1 - (np.arange(hgt) + 0.5) / px_per_mm
         gx, gy = np.meshgrid(xs, ys)
-        src = self.to_image(np.column_stack([gx.ravel(), gy.ravel()]))
+        src = self.to_image(np.column_stack([gx.ravel(), gy.ravel()]), z)
         src = np.nan_to_num(src, nan=-1e6)
         mx = src[:, 0].reshape(hgt, w).astype(np.float32)
         my = src[:, 1].reshape(hgt, w).astype(np.float32)
@@ -192,8 +192,9 @@ class BoardCamera:
         self._maps[key] = (mx, my)
         return mx, my
 
-    def rectify(self, frame: np.ndarray, rect, px_per_mm: float, border=(0, 0, 0)) -> np.ndarray:
-        mx, my = self.rectify_maps(rect, px_per_mm)
+    def rectify(self, frame: np.ndarray, rect, px_per_mm: float, border=(0, 0, 0), z: float = 0.0) -> np.ndarray:
+        """Top-down view of ``rect`` on the plane ``z`` mm in front of the board."""
+        mx, my = self.rectify_maps(rect, px_per_mm, z)
         return cv2.remap(frame, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=border)
 
     def coverage(self, rect: tuple[float, float, float, float]) -> list[list[float]]:
@@ -264,7 +265,7 @@ def calibrate_lens(corner_sets: list[np.ndarray], pattern: tuple[int, int], squa
                    image_size: tuple[int, int]) -> dict:
     """Intrinsics from several chessboard views. Returns {K, dist, rms_px, views}."""
     if len(corner_sets) < 4:
-        raise CameraGeometryError("Mindestens 4 Schachbrett-Aufnahmen aus verschiedenen Winkeln nötig (besser 10-15).")
+        raise CameraGeometryError("At least 4 chessboard shots from different angles are needed (10-15 is better).")
     cols, rows = pattern
     obj = np.zeros((cols * rows, 3), np.float32)
     obj[:, :2] = np.mgrid[0:cols, 0:rows].T.reshape(-1, 2) * float(square_mm)
@@ -273,6 +274,6 @@ def calibrate_lens(corner_sets: list[np.ndarray], pattern: tuple[int, int], squa
     flags = cv2.CALIB_FIX_K3 if len(corner_sets) < 10 else 0
     rms, K, dist, _, _ = cv2.calibrateCamera(objs, imgs, (int(image_size[0]), int(image_size[1])), None, None, flags=flags)
     if not math.isfinite(rms) or rms > 3.0:
-        raise CameraGeometryError(f"Objektiv-Kalibrierung unbrauchbar (Restfehler {rms:.2f} px). Schachbrett flach halten, mehr Winkel.")
+        raise CameraGeometryError(f"Lens calibration unusable (residual {rms:.2f} px). Keep the chessboard flat, use more angles.")
     return {"K": K.tolist(), "dist": dist.ravel().tolist(), "rms_px": float(rms), "views": len(corner_sets),
             "image_size": [int(image_size[0]), int(image_size[1])]}

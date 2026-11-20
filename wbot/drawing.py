@@ -34,7 +34,7 @@ def _as_pts(p) -> np.ndarray:
         return a.reshape(0, 2)
     a = a.reshape(-1, 2)
     if not np.all(np.isfinite(a)):
-        raise ValueError("Stroke enthält ungültige (nicht endliche) Koordinaten")
+        raise ValueError("Stroke contains invalid (non-finite) coordinates")
     return a
 
 
@@ -127,7 +127,7 @@ class Drawing:
             return self.copy()
         x0, y0, x1, y1 = rect[0] + margin, rect[1] + margin, rect[2] - margin, rect[3] - margin
         if x1 <= x0 or y1 <= y0:
-            raise ValueError("Zielbereich ist nach Abzug des Rands leer")
+            raise ValueError("Target area is empty after subtracting the margin")
         w, h = b[2] - b[0], b[3] - b[1]
         sx = (x1 - x0) / w if w > 1e-9 else None
         sy = (y1 - y0) / h if h > 1e-9 else None
@@ -155,13 +155,13 @@ class Drawing:
         if isinstance(data, (str, bytes)):
             data = json.loads(data)
         if not isinstance(data, dict) or not isinstance(data.get("strokes"), list):
-            raise ValueError("Ungültige Zeichnung: 'strokes' fehlt")
+            raise ValueError("Invalid drawing: 'strokes' is missing")
         strokes = []
         for i, s in enumerate(data["strokes"]):
             try:
                 strokes.append(Stroke(s["points"] if "points" in s else s["pts"], int(s.get("color", 0))))
             except (KeyError, TypeError, ValueError) as e:
-                raise ValueError(f"Ungültiger Strich Nr. {i}: {e}") from e
+                raise ValueError(f"Invalid stroke no. {i}: {e}") from e
         return cls(strokes, str(data.get("name", "")))
 
 
@@ -345,7 +345,7 @@ def optimize_order(drawing: Drawing, start: XY | None = None, *, merge_tol_mm: f
         S = np.array([s.start for s in grp])
         E = np.array([s.end for s in grp])
         if len(grp) > _MAX_NN:
-            log.warning("optimize_order: %d Striche, Reihenfolge bleibt unverändert", len(grp))
+            log.warning("optimize_order: %d strokes, order left unchanged", len(grp))
             order, flips = list(range(len(grp))), [False] * len(grp)
         else:
             order, flips = _nearest_neighbour(S, E, cur)

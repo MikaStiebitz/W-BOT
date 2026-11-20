@@ -50,7 +50,7 @@ OUTLIER_MIN_MM = 3.0
 
 
 class CalibrationError(ValueError):
-    """Bad input for the calibration fit (message is German, shown to the user)."""
+    """Bad input for the calibration fit (message is shown to the user)."""
 
 
 @dataclass(frozen=True)
@@ -79,10 +79,10 @@ _GROUPS: dict[str, tuple[str, ...]] = {
     "com_height": ("hc",), "com_x": ("cx",),          # gondola V2 centre of mass (tilt); see module docstring
 }
 DEFAULT_FREE = ("anchor_left", "anchor_right", "scale")
-_LABEL = {"al_x": "Anker links x", "al_y": "Anker links y", "ar_x": "Anker rechts x", "ar_y": "Anker rechts y",
-          "sl": "Maßstab links", "sr": "Maßstab rechts", "pen_x": "Stiftversatz x", "pen_y": "Stiftversatz y",
-          "r": "Riemenscheiben-Radius", "ref_x": "Referenz x", "ref_y": "Referenz y",
-          "hc": "Schwerpunkt-Höhe", "cx": "Schwerpunkt x"}
+_LABEL = {"al_x": "Left anchor x", "al_y": "Left anchor y", "ar_x": "Right anchor x", "ar_y": "Right anchor y",
+          "sl": "Left scale", "sr": "Right scale", "pen_x": "Pen offset x", "pen_y": "Pen offset y",
+          "r": "Pulley radius", "ref_x": "Reference x", "ref_y": "Reference y",
+          "hc": "Centre-of-mass height", "cx": "Centre of mass x"}
 
 
 def _nominal(cfg: Config) -> dict[str, float]:
@@ -133,7 +133,7 @@ def _flatten(cfg: Config, tp: MappingT[str, object] | None) -> dict[str, float]:
         elif key == "reference_correction":
             p["ref_x"], p["ref_y"] = float(val[0]), float(val[1])
         else:
-            raise ValueError(f"unbekannter Geometrie-Parameter '{key}'")
+            raise ValueError(f"unknown geometry parameter '{key}'")
     return p
 
 
@@ -149,7 +149,7 @@ class _Setup:
         try:
             fw_pts = m0.to_firmware(self.t)
         except KinematicsError as exc:
-            raise CalibrationError(f"Ein Messpunkt ist mit dieser Referenz nicht anfahrbar: {exc}") from exc
+            raise CalibrationError(f"A measurement point cannot be reached with this reference: {exc}") from exc
         self.dl = m0.fw.lengths(fw_pts) - m0.fw.lengths(m0.ref_fw)
 
     def predict(self, p: MappingT[str, float]) -> np.ndarray:
@@ -175,7 +175,7 @@ def suggest_targets(cfg: Config, n_x: int = 5, n_y: int = 4, inset_mm: float = 2
     """Well spread grid inside ``cfg.safe_rect()`` (inset, corners included). Order: x outer, y inner -
     the same order as the ``crosshair-points`` pattern with ``cols=n_x, rows=n_y, arm_mm=inset_mm``."""
     if n_x < 2 or n_y < 2:
-        raise CalibrationError("Mindestens 2 x 2 Messpunkte.")
+        raise CalibrationError("At least 2 x 2 measurement points are required.")
     x0, y0, x1, y1 = cfg.safe_rect()
     xs = np.linspace(x0 + inset_mm, x1 - inset_mm, n_x)
     ys = np.linspace(y0 + inset_mm, y1 - inset_mm, n_y)
@@ -231,22 +231,22 @@ def _resolve_free(free: Sequence[str] | None, n: int, warnings: list[str]) -> li
             free = DEFAULT_FREE
         elif n >= 3:
             free = ("scale",)
-            warnings.append(f"Nur {n} Messpunkte: es wird nur der Riemen-Maßstab angepasst. "
-                            "Für Anker-Korrektur mindestens 6, besser 12 bis 20 Punkte messen.")
+            warnings.append(f"Only {n} measurement points: only the belt scale is adjusted. "
+                            "For an anchor correction measure at least 6 points, ideally 12 to 20.")
         else:
             free = ()
     names = list(dict.fromkeys(free))
     for nm in names:
         if nm not in _GROUPS:
-            raise CalibrationError(f"Unbekannter freier Parameter '{nm}' (erlaubt: {', '.join(_GROUPS)}).")
+            raise CalibrationError(f"Unknown free parameter '{nm}' (allowed: {', '.join(_GROUPS)}).")
     if "scale_left" in names and "scale_right" in names:
         names = [x for x in names if x not in ("scale_left", "scale_right")] + ["scale"]
     if "scale" in names:
         names = [x for x in names if x not in ("scale_left", "scale_right")]
     if "pen_offset" in names and "anchor_left" in names and "anchor_right" in names:
         names.remove("pen_offset")
-        warnings.append("Der Stiftversatz ist von einer gemeinsamen Verschiebung beider Anker nicht zu "
-                        "unterscheiden und wird nicht separat angepasst (Anker sind frei).")
+        warnings.append("The pen offset cannot be distinguished from a common shift of both anchors "
+                        "and is not fitted separately (the anchors are free).")
     return names
 
 
@@ -302,20 +302,20 @@ def fit_geometry(cfg: Config, reference: XY, ref_fw: XY | None, measurements: Se
     meas_list = list(measurements)
     n = len(meas_list)
     if n > MAX_POINTS:
-        raise CalibrationError(f"Zu viele Messpunkte (max. {MAX_POINTS}).")
+        raise CalibrationError(f"Too many measurement points (max. {MAX_POINTS}).")
     warnings: list[str] = []
     try:
         tgt = np.array([m.target for m in meas_list], float).reshape(-1, 2)
         mea = np.array([m.measured for m in meas_list], float).reshape(-1, 2)
     except (TypeError, ValueError) as exc:
-        raise CalibrationError("Messpunkte ungültig (erwartet: Zielpunkt und gemessener Punkt je [x, y]).") from exc
+        raise CalibrationError("Invalid measurement points (expected: target point and measured point, each [x, y]).") from exc
     if not (np.all(np.isfinite(tgt)) and np.all(np.isfinite(mea))):
-        raise CalibrationError("Messpunkte enthalten ungültige Zahlen.")
+        raise CalibrationError("Measurement points contain invalid numbers.")
     names = _resolve_free(free, n, warnings)
     nom = _nominal(cfg)
     if "radius" in names and nom["r"] <= 0.0:
         names.remove("radius")
-        warnings.append("Radius wird im Modus 'naive' nicht angepasst.")
+        warnings.append("The radius is not fitted in 'naive' mode.")
 
     def empty(extra: str | None = None) -> CalibResult:
         if extra:
@@ -326,17 +326,17 @@ def fit_geometry(cfg: Config, reference: XY, ref_fw: XY | None, measurements: Se
                            residuals_before=before)
 
     if n < 3 or not names:
-        return empty(f"Zu wenige Messpunkte ({n}): mindestens 3, empfohlen 12 bis 20 über das ganze Board verteilt.")
+        return empty(f"Too few measurement points ({n}): at least 3, 12 to 20 spread over the whole board recommended.")
     comps = [_comp(nm, nom) for g in names for nm in _GROUPS[g]]
     if len(comps) >= 2 * n:
-        return empty(f"{len(comps)} freie Parameter bei nur {n} Messpunkten: unterbestimmt, keine Anpassung.")
+        return empty(f"{len(comps)} free parameters with only {n} measurement points: underdetermined, no fit.")
     if len(comps) > 2 * n - 4:
-        warnings.append(f"Wenige Messpunkte für {len(comps)} freie Parameter - das Ergebnis ist unsicher.")
+        warnings.append(f"Few measurement points for {len(comps)} free parameters - the result is uncertain.")
 
     x0, y0, x1, y1 = cfg.safe_rect()
     if np.ptp(tgt[:, 0]) < 0.4 * (x1 - x0) or np.ptp(tgt[:, 1]) < 0.4 * (y1 - y0):
-        warnings.append("Die Messpunkte decken weniger als 40 % der Boardbreite oder -höhe ab - "
-                        "Messpunkte besser über das ganze Board verteilen.")
+        warnings.append("The measurement points cover less than 40 % of the board width or height - "
+                        "spread them over the whole board.")
 
     setup = _Setup(cfg, reference, ref_fw, tgt)
     pred0 = setup.predict(nom)
@@ -351,8 +351,8 @@ def fit_geometry(cfg: Config, reference: XY, ref_fw: XY | None, measurements: Se
     if len(bad) and n - len(bad) >= max(3, len(comps) // 2 + 1) and len(bad) <= max(1, n // 4):
         mask[bad] = False
         x, p, data_res, prior_w, lo, hi = _solve(setup, mea, mask, comps, nom, loss_scale_mm)
-        warnings.append("Messpunkt " + ", ".join(str(int(i) + 1) for i in bad) + " weicht stark ab "
-                        f"({', '.join(f'{r_all[i]:.1f}' for i in bad)} mm) und wurde ignoriert - Tippfehler?")
+        warnings.append("Measurement point " + ", ".join(str(int(i) + 1) for i in bad) + " deviates strongly "
+                        f"({', '.join(f'{r_all[i]:.1f}' for i in bad)} mm) and was ignored - typo?")
     outliers = [int(i) for i in np.where(~mask)[0]]
 
     pred = setup.predict(p)
@@ -374,32 +374,32 @@ def fit_geometry(cfg: Config, reference: XY, ref_fw: XY | None, measurements: Se
         for c, s_x in zip(comps, sd):
             std[c.name] = float(s_x / c.k)
             if s_x > STD_WARN_MM:
-                warnings.append(f"{_LABEL[c.name]} ist nur auf etwa ±{s_x:.1f} mm (Wirkung am Stift) bestimmt (zu wenige oder "
-                                "ungünstig verteilte Messpunkte).")
+                warnings.append(f"{_LABEL[c.name]} is only determined to about ±{s_x:.1f} mm (effect at the pen) "
+                                "(too few or poorly distributed measurement points).")
         if cond > COND_WARN or not math.isfinite(cond):
-            warnings.append(f"Schlecht konditionierte Anpassung (Konditionszahl {cond:.0f}): die Messpunkte "
-                            "bestimmen die Parameter nur ungenau. Mehr Punkte, besser verteilt, oder weniger "
-                            "freie Parameter wählen.")
+            warnings.append(f"Ill-conditioned fit (condition number {cond:.0f}): the measurement points "
+                            "determine the parameters only imprecisely. Use more points, better distributed, or "
+                            "fewer free parameters.")
     at_bound = [c for c, xi, a, b in zip(comps, x, lo, hi) if min(xi - a, b - xi) < 1e-3 * (b - a)]
     if at_bound:
-        warnings.append("Parameter am Grenzwert: " + ", ".join(_LABEL[c.name] for c in at_bound) +
-                        ". Vermutlich ein Messfehler oder ein nicht modellierter Fehler.")
+        warnings.append("Parameter at its limit: " + ", ".join(_LABEL[c.name] for c in at_bound) +
+                        ". Probably a measurement error or an unmodelled error.")
 
     # --- decision: never hand out a patch that does not clearly help
     improved = rms_b >= min_rms_mm and rms_a <= 0.85 * rms_b and rms_b - rms_a >= 0.2
     if not improved:
         if rms_b < min_rms_mm:
-            warnings.append(f"Die Abweichung ({rms_b:.2f} mm rms) liegt im Bereich der Messgenauigkeit - "
-                            "keine Änderung nötig.")
+            warnings.append(f"The deviation ({rms_b:.2f} mm rms) is within measurement accuracy - "
+                            "no change needed.")
         else:
-            warnings.append(f"Die Anpassung verbessert die Messwerte nicht nennenswert ({rms_b:.2f} → "
-                            f"{rms_a:.2f} mm rms) - Konfiguration bleibt unverändert.")
+            warnings.append(f"The fit does not improve the measurements noticeably ({rms_b:.2f} → "
+                            f"{rms_a:.2f} mm rms) - configuration left unchanged.")
     patch = _build_patch(cfg, names, p) if improved else {}
     if patch:
         try:
             deep_update(cfg, patch)
         except Exception as exc:  # noqa: BLE001 - pydantic validation error
-            warnings.append(f"Das berechnete Ergebnis ist ungültig ({exc}) - keine Änderung.")
+            warnings.append(f"The computed result is invalid ({exc}) - no change.")
             patch, improved = {}, False
 
     full = {c.name: float(p[c.name]) for c in comps}

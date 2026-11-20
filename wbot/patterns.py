@@ -1,6 +1,6 @@
 """Test images for verifying accuracy and the hardware.
 
-``REGISTRY`` maps a pattern id to a :class:`Pattern` (German name, description and
+``REGISTRY`` maps a pattern id to a :class:`Pattern` (name, description and
 parameter labels for the UI). Every pattern builds a :class:`Drawing` in board mm
 that lies inside ``cfg.safe_rect()`` (the result is clipped as a last resort).
 Use :func:`build_pattern` to fill defaults and validate parameters.
@@ -27,7 +27,7 @@ class Param:
     default: Any
     min: float | None = None
     max: float | None = None
-    choices: list[tuple[str, str]] | None = None  # (value, German label)
+    choices: list[tuple[str, str]] | None = None  # (value, label)
     unit: str | None = None
 
     def to_dict(self) -> dict:
@@ -45,26 +45,26 @@ class Param:
             if k == "str":
                 s = str(value)
                 if self.max is not None and len(s) > self.max:
-                    raise ValueError(f"'{name}' ist zu lang (max. {int(self.max)} Zeichen)")
+                    raise ValueError(f"'{name}' is too long (max. {int(self.max)} characters)")
                 return s
             if k == "choice":
                 if str(value) not in [v for v, _ in (self.choices or [])]:
-                    raise ValueError(f"'{name}': ungültige Auswahl '{value}'")
+                    raise ValueError(f"'{name}': invalid choice '{value}'")
                 return str(value)
             if isinstance(value, bool) or value is None:
                 raise TypeError
             v = int(value) if k == "int" else float(value)
             if k == "int" and float(value) != v:
-                raise ValueError(f"'{name}' muss eine ganze Zahl sein")
+                raise ValueError(f"'{name}' must be a whole number")
         except (TypeError, ValueError) as e:
             if isinstance(e, ValueError) and "'" in str(e):
                 raise
-            raise ValueError(f"'{name}': ungültiger Wert '{value}'") from None
+            raise ValueError(f"'{name}': invalid value '{value}'") from None
         if not math.isfinite(v):
-            raise ValueError(f"'{name}': ungültiger Wert")
+            raise ValueError(f"'{name}': invalid value")
         if (self.min is not None and v < self.min) or (self.max is not None and v > self.max):
             unit = f" {self.unit}" if self.unit else ""
-            raise ValueError(f"'{name}' muss zwischen {self.min:g} und {self.max:g}{unit} liegen (ist {v:g})")
+            raise ValueError(f"'{name}' must be between {self.min:g} and {self.max:g}{unit} (is {v:g})")
         return v
 
 
@@ -85,7 +85,7 @@ class Pattern:
         known = {p.id: p for p in self.params}
         for k, v in values.items():
             if k not in known:
-                raise ValueError(f"Unbekannter Parameter '{k}' für Testbild '{self.name}'")
+                raise ValueError(f"Unknown parameter '{k}' for test pattern '{self.name}'")
             out[k] = known[k].coerce(v)
         return out
 
@@ -115,7 +115,7 @@ def build_pattern(cfg: Config, pattern_id: str, params: dict | None = None) -> D
     """Build a registered pattern with defaults filled in and ranges validated."""
     pat = REGISTRY.get(pattern_id)
     if pat is None:
-        raise ValueError(f"Unbekanntes Testbild '{pattern_id}'")
+        raise ValueError(f"Unknown test pattern '{pattern_id}'")
     return pat.build(cfg, pat.resolve(params))
 
 
@@ -129,7 +129,7 @@ def _P(id, label, kind, default, mn=None, mx=None, unit=None, choices=None) -> P
     return Param(id, label, kind, default, mn, mx, choices, unit)
 
 
-_COLOR = _P("color", "Farbe (Slot)", "int", 0, 0, 2)
+_COLOR = _P("color", "Colour (slot)", "int", 0, 0, 2)
 
 
 def _line(x0, y0, x1, y1, c=0) -> Stroke:
@@ -165,12 +165,12 @@ def _multiples(step: float, lo: float, hi: float) -> list[float]:
 
 
 # ------------------------------------------------------------------------------ patterns
-@_register("calibration-grid", "Kalibrier-Raster",
-           "Linienraster im festen Abstand mit Beschriftung in mm. Zum Vermessen von Maßstab und Rechtwinkligkeit.",
-           [_P("spacing_mm", "Linienabstand", "float", 100.0, 10, 500, "mm"),
-            _P("labels", "Beschriftung", "bool", True),
-            _P("label_size_mm", "Schrifthöhe", "float", 8.0, 3, 20, "mm"),
-            _P("frame", "Rahmen zeichnen", "bool", True)])
+@_register("calibration-grid", "Calibration grid",
+           "Line grid at a fixed spacing with labels in mm. For measuring scale and squareness.",
+           [_P("spacing_mm", "Line spacing", "float", 100.0, 10, 500, "mm"),
+            _P("labels", "Labels", "bool", True),
+            _P("label_size_mm", "Label height", "float", 8.0, 3, 20, "mm"),
+            _P("frame", "Draw frame", "bool", True)])
 def _grid(cfg, p):
     x0, y0, x1, y1, _, _ = _ctx(cfg)
     c, sp = p["color"], p["spacing_mm"]
@@ -185,13 +185,13 @@ def _grid(cfg, p):
     return s
 
 
-@_register("crosshair-points", "Messkreuze",
-           "Kleine Kreuze auf einem bekannten Punktraster (Ecken und Mitte inklusive bei ungerader Anzahl). "
-           "Mit dem Lineal nachmessen.",
-           [_P("cols", "Spalten", "int", 5, 2, 15), _P("rows", "Zeilen", "int", 3, 2, 11),
-            _P("arm_mm", "Armlänge", "float", 5.0, 2, 20, "mm"),
-            _P("labels", "Koordinaten beschriften", "bool", False),
-            _P("label_size_mm", "Schrifthöhe", "float", 5.0, 3, 12, "mm")])
+@_register("crosshair-points", "Measurement crosses",
+           "Small crosses on a known point grid (corners and centre included for odd counts). "
+           "Measure them again with a ruler.",
+           [_P("cols", "Columns", "int", 5, 2, 15), _P("rows", "Rows", "int", 3, 2, 11),
+            _P("arm_mm", "Arm length", "float", 5.0, 2, 20, "mm"),
+            _P("labels", "Label coordinates", "bool", False),
+            _P("label_size_mm", "Label height", "float", 5.0, 3, 12, "mm")])
 def _crosses(cfg, p):
     x0, y0, x1, y1, cx, cy = _ctx(cfg)
     a, c = p["arm_mm"], p["color"]
@@ -210,16 +210,16 @@ def _crosses(cfg, p):
     return s
 
 
-@_register("square-frame", "Rahmen", "Umriss des erlaubten Zeichenbereichs (optional nach innen versetzt).",
-           [_P("inset_mm", "Einzug", "float", 0.0, 0, 400, "mm")])
+@_register("square-frame", "Frame", "Outline of the permitted drawing area (optionally inset).",
+           [_P("inset_mm", "Inset", "float", 0.0, 0, 400, "mm")])
 def _frame(cfg, p):
     x0, y0, x1, y1, _, _ = _ctx(cfg)
     i = p["inset_mm"]
     return [_rect(x0 + i, y0 + i, x1 - i, y1 - i, p["color"])] if x1 - x0 > 2 * i and y1 - y0 > 2 * i else []
 
 
-@_register("diagonals", "Diagonalen", "Beide Diagonalen des Zeichenbereichs. Prüft die Geometrie über die ganze Fläche.",
-           [_P("inset_mm", "Einzug", "float", 0.0, 0, 400, "mm"), _P("frame", "Rahmen zeichnen", "bool", False)])
+@_register("diagonals", "Diagonals", "Both diagonals of the drawing area. Checks the geometry across the whole surface.",
+           [_P("inset_mm", "Inset", "float", 0.0, 0, 400, "mm"), _P("frame", "Draw frame", "bool", False)])
 def _diag(cfg, p):
     x0, y0, x1, y1, _, _ = _ctx(cfg)
     i, c = p["inset_mm"], p["color"]
@@ -228,21 +228,21 @@ def _diag(cfg, p):
     return s + ([_rect(a, b, e, f, c)] if p["frame"] else [])
 
 
-@_register("circles", "Konzentrische Kreise", "Kreise um den Mittelpunkt des Zeichenbereichs.",
-           [_P("count", "Anzahl", "int", 5, 1, 20), _P("outer_radius_mm", "Äußerer Radius", "float", 360.0, 10, 490, "mm")])
+@_register("circles", "Concentric circles", "Circles around the centre of the drawing area.",
+           [_P("count", "Count", "int", 5, 1, 20), _P("outer_radius_mm", "Outer radius", "float", 360.0, 10, 490, "mm")])
 def _circles(cfg, p):
     _, _, _, _, cx, cy = _ctx(cfg)
     return [_circle(cx, cy, p["outer_radius_mm"] * (i + 1) / p["count"], p["color"]) for i in range(p["count"])]
 
 
-@_register("circle-accuracy", "Kreis-Genauigkeit",
-           "Kreis mit Achsenkreuz sowie ein- und umbeschriebenem Quadrat. Durchmesser und Diagonalen nachmessen: "
-           "Abweichungen zeigen Maßstabs- und Geometriefehler.",
-           [_P("diameter_mm", "Durchmesser", "float", 300.0, 20, 960, "mm"),
-            _P("squares", "Quadrate", "choice", "both",
-               choices=[("both", "Beide"), ("inscribed", "Einbeschrieben"),
-                        ("circumscribed", "Umbeschrieben"), ("none", "Keine")]),
-            _P("axes", "Achsenkreuz", "bool", True)])
+@_register("circle-accuracy", "Circle accuracy",
+           "Circle with a cross of axes plus an inscribed and a circumscribed square. Measure the diameter and diagonals: "
+           "deviations reveal scale and geometry errors.",
+           [_P("diameter_mm", "Diameter", "float", 300.0, 20, 960, "mm"),
+            _P("squares", "Squares", "choice", "both",
+               choices=[("both", "Both"), ("inscribed", "Inscribed"),
+                        ("circumscribed", "Circumscribed"), ("none", "None")]),
+            _P("axes", "Axes cross", "bool", True)])
 def _circle_acc(cfg, p):
     _, _, _, _, cx, cy = _ctx(cfg)
     r, c = p["diameter_mm"] / 2, p["color"]
@@ -257,9 +257,9 @@ def _circle_acc(cfg, p):
     return s
 
 
-@_register("spiral", "Spirale", "Archimedische Spirale. Prüft glatte Kurven und gleichmäßigen Vorschub.",
-           [_P("turns", "Windungen", "float", 6.0, 1, 30), _P("outer_radius_mm", "Äußerer Radius", "float", 360.0, 10, 490, "mm"),
-            _P("inner_radius_mm", "Innerer Radius", "float", 5.0, 0, 200, "mm")])
+@_register("spiral", "Spiral", "Archimedean spiral. Checks smooth curves and even feed.",
+           [_P("turns", "Turns", "float", 6.0, 1, 30), _P("outer_radius_mm", "Outer radius", "float", 360.0, 10, 490, "mm"),
+            _P("inner_radius_mm", "Inner radius", "float", 5.0, 0, 200, "mm")])
 def _spiral(cfg, p):
     _, _, _, _, cx, cy = _ctx(cfg)
     r0, r1 = min(p["inner_radius_mm"], p["outer_radius_mm"]), p["outer_radius_mm"]
@@ -270,9 +270,9 @@ def _spiral(cfg, p):
     return [Stroke(np.column_stack([cx + r * np.cos(th), cy + r * np.sin(th)]), p["color"])]
 
 
-@_register("star", "Stern", "Sternpolygon (Pentagramm u. a.) mit Umkreis. Prüft Winkel und lange Diagonalen.",
-           [_P("points", "Zacken", "int", 5, 3, 16), _P("skip", "Sprung", "int", 2, 1, 7),
-            _P("radius_mm", "Radius", "float", 350.0, 20, 490, "mm"), _P("circle", "Umkreis", "bool", True)])
+@_register("star", "Star", "Star polygon (pentagram etc.) with a circumscribed circle. Checks angles and long diagonals.",
+           [_P("points", "Points", "int", 5, 3, 16), _P("skip", "Skip", "int", 2, 1, 7),
+            _P("radius_mm", "Radius", "float", 350.0, 20, 490, "mm"), _P("circle", "Circumscribed circle", "bool", True)])
 def _star(cfg, p):
     _, _, _, _, cx, cy = _ctx(cfg)
     n, k, r, c = p["points"], min(p["skip"], max((p["points"] - 1) // 2, 1)), p["radius_mm"], p["color"]
@@ -292,8 +292,8 @@ def _star(cfg, p):
     return s + ([_circle(cx, cy, r, c)] if p["circle"] else [])
 
 
-@_register("corner-marks", "Eckmarken", "L-förmige Marken in den vier Ecken des Zeichenbereichs.",
-           [_P("length_mm", "Schenkellänge", "float", 50.0, 10, 200, "mm")])
+@_register("corner-marks", "Corner marks", "L-shaped marks in the four corners of the drawing area.",
+           [_P("length_mm", "Leg length", "float", 50.0, 10, 200, "mm")])
 def _corners(cfg, p):
     x0, y0, x1, y1, _, _ = _ctx(cfg)
     return _l_marks(x0, y0, x1, y1, p["length_mm"], p["color"])
@@ -307,10 +307,10 @@ def _l_marks(x0, y0, x1, y1, L, c) -> list[Stroke]:
     return s
 
 
-@_register("ruler", "Lineale", "Lineale mit mm-Skala an der unteren und linken Kante, Beschriftung alle 100 mm.",
-           [_P("axis", "Achsen", "choice", "both", choices=[("both", "X und Y"), ("x", "Nur X"), ("y", "Nur Y")]),
-            _P("tick_mm", "Teilstrich-Abstand", "float", 10.0, 1, 50, "mm"),
-            _P("labels", "Beschriftung", "bool", True), _P("label_size_mm", "Schrifthöhe", "float", 6.0, 3, 15, "mm")])
+@_register("ruler", "Rulers", "Rulers with a mm scale along the bottom and left edges, labelled every 100 mm.",
+           [_P("axis", "Axes", "choice", "both", choices=[("both", "X and Y"), ("x", "X only"), ("y", "Y only")]),
+            _P("tick_mm", "Tick spacing", "float", 10.0, 1, 50, "mm"),
+            _P("labels", "Labels", "bool", True), _P("label_size_mm", "Label height", "float", 6.0, 3, 15, "mm")])
 def _ruler(cfg, p):
     x0, y0, x1, y1, _, _ = _ctx(cfg)
     c, t = p["color"], p["tick_mm"]
@@ -339,12 +339,12 @@ def _ruler(cfg, p):
     return s
 
 
-@_register("text", "Text", "Beliebiger Text in Einstrich-Schrift (Hershey). Umlaute werden unterstützt.",
+@_register("text", "Text", "Any text in a single-stroke font (Hershey). Umlauts are supported.",
            [_P("text", "Text", "str", "W-BOT", None, 200),
-            _P("size_mm", "Schrifthöhe (Großbuchstaben)", "float", 40.0, 3, 300, "mm"),
-            _P("align", "Ausrichtung", "choice", "center",
-               choices=[("left", "Links"), ("center", "Mitte"), ("right", "Rechts")]),
-            _P("fit", "Auf Breite verkleinern", "bool", True)])
+            _P("size_mm", "Text height (capital letters)", "float", 40.0, 3, 300, "mm"),
+            _P("align", "Alignment", "choice", "center",
+               choices=[("left", "Left"), ("center", "Centre"), ("right", "Right")]),
+            _P("fit", "Shrink to fit width", "bool", True)])
 def _text(cfg, p):
     x0, y0, x1, y1, cx, cy = _ctx(cfg)
     size = p["size_mm"]
@@ -373,18 +373,18 @@ def _color_row(cfg: Config, cy: float, size: float, label: float) -> list[Stroke
     return s
 
 
-@_register("color-test", "Farbtest",
-           "Pro Farbe ein schraffiertes Quadrat, ein Kreis, drei Linien und der Farbname. Testet den Revolver "
-           "und den Farbwechsel.",
-           [_P("size_mm", "Formgröße", "float", 40.0, 10, 100, "mm")], colored=False)
+@_register("color-test", "Colour test",
+           "For each colour a hatched square, a circle, three lines and the colour name. Tests the revolver "
+           "and the colour change.",
+           [_P("size_mm", "Shape size", "float", 40.0, 10, 100, "mm")], colored=False)
 def _colors(cfg, p):
     _, _, _, _, _, cy = _ctx(cfg)
     return _color_row(cfg, cy, p["size_mm"], min(10.0, p["size_mm"] / 3))
 
 
-@_register("pen-test", "Stift-Test",
-           "Punkte, Striche verschiedener Länge, Strich-Lücken-Linie und Stricheleien. Testet Stiftdruck, Heben und Senken.",
-           [_P("dots", "Anzahl Punkte", "int", 10, 3, 40), _P("dot_spacing_mm", "Punktabstand", "float", 10.0, 3, 30, "mm")])
+@_register("pen-test", "Pen test",
+           "Dots, strokes of different lengths, a dash-gap line and scribbles. Tests pen pressure, lifting and lowering.",
+           [_P("dots", "Number of dots", "int", 10, 3, 40), _P("dot_spacing_mm", "Dot spacing", "float", 10.0, 3, 30, "mm")])
 def _pen(cfg, p):
     _, _, _, _, cx, cy = _ctx(cfg)
     c, n, sp = p["color"], p["dots"], p["dot_spacing_mm"]
@@ -402,10 +402,10 @@ def _pen(cfg, p):
     return s
 
 
-@_register("speed-test", "Geschwindigkeits-Test",
-           "Waagerechte Linien unterschiedlicher Länge, Zickzack und Rechteckwelle (scharfe Ecken). "
-           "Zeigt Beschleunigung, Ecken-Verrundung und Schlupf.",
-           [_P("max_length_mm", "Längste Linie", "float", 800.0, 100, 1400, "mm"), _P("steps", "Anzahl Linien", "int", 5, 2, 8)])
+@_register("speed-test", "Speed test",
+           "Horizontal lines of different lengths, zigzag and square wave (sharp corners). "
+           "Shows acceleration, corner rounding and slip.",
+           [_P("max_length_mm", "Longest line", "float", 800.0, 100, 1400, "mm"), _P("steps", "Number of lines", "int", 5, 2, 8)])
 def _speed(cfg, p):
     x0, y0, x1, y1, cx, cy = _ctx(cfg)
     c, s = p["color"], []
@@ -426,9 +426,9 @@ def _speed(cfg, p):
     return s
 
 
-@_register("full-board-test", "Gesamttest",
-           "Alles kompakt in einem Bild: Rahmen, Raster, Kreis, Messkreuze, Eckmarken, Text und Farbtest.",
-           [_P("with_colors", "Farbtest einschließen", "bool", True)], colored=False)
+@_register("full-board-test", "Full-board test",
+           "Everything compactly in one image: frame, grid, circle, measurement crosses, corner marks, text and colour test.",
+           [_P("with_colors", "Include colour test", "bool", True)], colored=False)
 def _full(cfg, p):
     x0, y0, x1, y1, cx, cy = _ctx(cfg)
     c = 0
@@ -452,10 +452,10 @@ def tape_points(cfg: Config, cols: int = 3, rows: int = 3, inset_mm: float = 20.
     return [(chr(65 + r * cols + k), float(x), float(y)) for r, y in enumerate(ys) for k, x in enumerate(xs)]
 
 
-@_register("tape-points", "Maßband-Punkte",
-           "Beschriftete Kreuze (A, B, C ...) für die Kalibrierung mit dem Maßband: nur Abstände messen.",
-           [_P("cols", "Spalten", "int", 3, 2, 5), _P("rows", "Zeilen", "int", 3, 2, 4),
-            _P("arm_mm", "Armlänge", "float", 12.0, 4, 20, "mm"), _P("label_size_mm", "Schrifthöhe", "float", 14.0, 6, 30, "mm")])
+@_register("tape-points", "Tape-measure points",
+           "Labelled crosses (A, B, C ...) for calibration with a tape measure: only measure distances.",
+           [_P("cols", "Columns", "int", 3, 2, 5), _P("rows", "Rows", "int", 3, 2, 4),
+            _P("arm_mm", "Arm length", "float", 12.0, 4, 20, "mm"), _P("label_size_mm", "Label height", "float", 14.0, 6, 30, "mm")])
 def _tape(cfg, p):
     c, a, hs = p["color"], p["arm_mm"], p["label_size_mm"]
     x0, y0, x1, y1, cx, cy = _ctx(cfg)

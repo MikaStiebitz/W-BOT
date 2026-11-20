@@ -1,10 +1,10 @@
-// Was darf der Nutzer gerade? Liefert für jede Aktion einen leeren String (erlaubt) oder die deutsche Begründung.
+// What may the user do right now? For each action: an empty string (allowed) or the reason it is blocked.
 
 const ACTIVE_JOB = new Set(['planning', 'running', 'paused']);
 
 export const MACHINE_LABEL = {
-  disconnected: 'Getrennt', idle: 'Bereit', run: 'Läuft', hold: 'Pause', jog: 'Jog',
-  alarm: 'Alarm', door: 'Tür offen', check: 'Check',
+  disconnected: 'Disconnected', idle: 'Ready', run: 'Running', hold: 'Paused', jog: 'Jogging',
+  alarm: 'Alarm', door: 'Door open', check: 'Check',
 };
 
 export function alarmText(a) {
@@ -12,7 +12,7 @@ export function alarmText(a) {
   if (typeof a === 'string') return a;
   if (typeof a === 'number') return `Alarm ${a}`;
   const code = a.code != null ? `ALARM ${a.code}: ` : '';
-  return code + (a.text || a.message || 'Alarm aktiv');
+  return code + (a.text || a.message || 'Alarm active');
 }
 
 export function caps(state, job) {
@@ -24,20 +24,20 @@ export function caps(state, job) {
   const busy = !!st?.machine?.busy || jobActive || ms === 'run' || ms === 'jog' || ms === 'hold';
   const referenced = !!st?.reference?.set;
 
-  const base = !connected ? 'Nicht verbunden. Oben verbinden.'
-    : alarm ? 'Alarm aktiv. Erst entsperren ($X) oder zurücksetzen.' : '';
-  const idle = base || (busy ? (jobActive ? 'Ein Job läuft. Erst pausieren oder abbrechen.' : 'Die Maschine fährt gerade. Warten oder Not-Halt.') : '');
-  const abs = idle || (!referenced ? 'Keine Referenz. Erst „Gondel steht jetzt hier“ setzen (Reiter Fahren).' : '');
+  const base = !connected ? 'Not connected. Connect at the top.'
+    : alarm ? 'Alarm active. Unlock ($X) or reset first.' : '';
+  const idle = base || (busy ? (jobActive ? 'A job is running. Pause or cancel it first.' : 'The machine is moving. Wait or press E-stop.') : '');
+  const abs = idle || (!referenced ? 'No position reference. Set the gondola position first (Setup tab).' : '');
 
   return {
     connected, alarm, busy, jobActive, referenced, ms,
-    /** Jog / Servo-Test / Stift / Revolver / Referenz setzen */
+    /** Jog / servo test / pen / revolver / set position reference */
     move: idle,
-    /** Servo-Befehle brauchen keine Referenz, aber freie Maschine */
+    /** Servo commands need no position reference, but an idle machine */
     servo: idle,
-    /** Absolute Fahrten: goto, park, Zeichnen */
+    /** Absolute moves: goto, park, drawing */
     abs,
-    /** Nur verbunden und kein Alarm (z. B. Konsole senden) */
+    /** Connected and no alarm only (e.g. sending from the console) */
     online: base,
     penDown: st?.pen ? !st.pen.up : false,
   };

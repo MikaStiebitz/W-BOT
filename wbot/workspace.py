@@ -110,5 +110,5 @@ def suggest_rect(cfg: Config, max_amp: float = 5.0, min_tension_n: float = 0.2,
                     best = (area, xm, ytop)
                 break               # lower ytop only shrinks the area for this xm
     if best is None:
-        raise ValueError("kein nutzbarer Bereich mit diesen Grenzwerten")
+        raise ValueError("no usable area with these limits")
     return (float(best[1]), float(ybot), float(b.width_mm - best[1]), float(best[2]))

@@ -94,7 +94,7 @@ def test_reference_and_pen_offset_are_fittable_when_identifiable():
     assert res2.patch["geometry"]["pen_offset_mm"] == pytest.approx([2.0, -1.5], abs=0.3)
     # ... but indistinguishable from a common anchor shift, so it is dropped when both anchors are free
     res3 = fit_geometry(CFG, REF, REF, measure(CFG, tp2, tg, 0.1, 4), ("anchor_left", "anchor_right", "pen_offset"))
-    assert "pen_offset" not in res3.free and any("Stiftversatz" in w for w in res3.warnings)
+    assert "pen_offset" not in res3.free and any("pen offset" in w.lower() for w in res3.warnings)
     assert "pen_offset_mm" not in res3.patch.get("geometry", {})
 
 
@@ -103,24 +103,24 @@ def test_too_few_or_clustered_points_warn_and_restrict():
     tp = truth_params(CFG, PERTURB)
     tg = suggest_targets(CFG)
     r2 = fit_geometry(CFG, REF, REF, measure(CFG, tp, tg[:2], 0.1, 1))
-    assert r2.patch == {} and not r2.improved and any("wenige" in w for w in r2.warnings)
+    assert r2.patch == {} and not r2.improved and any("Too few" in w for w in r2.warnings)
     r4 = fit_geometry(CFG, REF, REF, measure(CFG, tp, [tg[0], tg[7], tg[12], tg[19]], 0.1, 1))
-    assert r4.free == ["scale"] and any("Nur 4 Messpunkte" in w for w in r4.warnings)
+    assert r4.free == ["scale"] and any("Only 4 measurement points" in w for w in r4.warnings)
     assert set(r4.patch["geometry"]) == {"belt_scale_left", "belt_scale_right"} and "firmware" not in r4.patch
     # explicit request for more parameters than the data can carry
     r5 = fit_geometry(CFG, REF, REF, measure(CFG, tp, tg[:3], 0.1, 1),
                       ("anchor_left", "anchor_right", "scale", "reference"))
-    assert r5.patch == {} and any("unterbestimmt" in w for w in r5.warnings)
+    assert r5.patch == {} and any("underdetermined" in w for w in r5.warnings)
     # all crosses in one corner patch: ill-conditioned -> must say so
     near = [(100.0 + 25.0 * i, 100.0 + 20.0 * j) for i in range(4) for j in range(3)]
     rc = fit_geometry(CFG, REF, REF, measure(CFG, tp, near, 0.2, 2))
-    assert any("Konditionszahl" in w or "bestimmt" in w for w in rc.warnings)
+    assert any("condition number" in w or "underdetermined" in w for w in rc.warnings)
     assert any("40 %" in w for w in rc.warnings)
     # too many free parameters (incl. radius) on a modest set is flagged as badly conditioned
     rr = fit_geometry(CFG, REF, REF, measure(CFG, tp, tg, 0.3, 2),
                       ("anchor_left", "anchor_right", "scale", "reference", "radius"))
-    assert rr.condition_number > 150 and any("Konditionszahl" in w for w in rr.warnings)
-    with pytest.raises(CalibrationError, match="Unbekannter"):
+    assert rr.condition_number > 150 and any("condition number" in w for w in rr.warnings)
+    with pytest.raises(CalibrationError, match="Unknown free parameter"):
         fit_geometry(CFG, REF, REF, measure(CFG, tp, tg, 0.1, 1), ("bogus",))
 
 
@@ -129,7 +129,7 @@ def test_noise_only_on_nominal_machine_claims_no_improvement():
     for seed in range(5):
         res = fit_geometry(CFG, REF, REF, measure(CFG, {}, tg, noise=0.3, seed=seed))
         assert res.rms_before < 0.6 and not res.improved
-        assert res.patch == {} and any("Messgenauigkeit" in w for w in res.warnings)
+        assert res.patch == {} and any("measurement accuracy" in w for w in res.warnings)
         assert res.max_before < 2.0                    # sanity: pure noise, nothing systematic
         assert all(abs(v) < 2.0 for v in (res.params["al_x"] - CFG.geometry.anchor_left[0],
                                           res.params["al_y"] - CFG.geometry.anchor_left[1],
@@ -145,7 +145,7 @@ def test_outlier_of_15mm_does_not_wreck_the_fit():
     bad = ms[8]
     ms[8] = Measurement(bad.target, (bad.measured[0] + 15.0, bad.measured[1] - 4.0))
     res = fit_geometry(CFG, REF, REF, ms)
-    assert res.improved and res.outliers == [8] and any("Messpunkt 9" in w for w in res.warnings)
+    assert res.improved and res.outliers == [8] and any("Measurement point 9" in w for w in res.warnings)
     assert res.rms_after < 0.5
     new = deep_update(CFG, res.patch)
     rng = np.random.default_rng(8)

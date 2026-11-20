@@ -18,12 +18,12 @@ def test_good_sequence_passes():
 
 def test_revolver_with_pen_down_refused():
     p = validate_gcode([f"G1 A{A0:.3f} F100"], CFG, M, z_axis=Z_DOWN)
-    assert p and "Stift" in p[0].message
+    assert p and "pen" in p[0].message
 
 
 def test_revolver_and_motion_in_one_line_refused():
     p = validate_gcode([f"G1 A{A0:.3f} X5 Y5"], CFG, M, z_axis=Z_UP)
-    assert any("derselben Zeile" in x.message for x in p)
+    assert any("same line" in x.message for x in p)
 
 
 def test_out_of_bounds_refused():
@@ -52,9 +52,9 @@ def test_way_in_from_outside_is_allowed_but_only_once():
 def test_revolver_needs_settle_time_after_lifting_the_pen():
     """The steel pen hits the ring edge if the revolver turns before the pen is really up."""
     too_early = [f"G1 Z{Z_UP:.3f} F30000", f"G1 A{A0:.3f} F30000"]
-    assert any("zu früh" in p.message for p in validate_gcode(too_early, CFG, M, z_axis=Z_DOWN))
+    assert any("too soon" in p.message for p in validate_gcode(too_early, CFG, M, z_axis=Z_DOWN))
     short = [f"G1 Z{Z_UP:.3f} F30000", "G4 P0.05", f"G1 A{A0:.3f} F30000"]
-    assert any("zu früh" in p.message for p in validate_gcode(short, CFG, M, z_axis=Z_DOWN))
+    assert any("too soon" in p.message for p in validate_gcode(short, CFG, M, z_axis=Z_DOWN))
     ok = [f"G1 Z{Z_UP:.3f} F30000", f"G4 P{CFG.servos.pen.settle_s:.2f}", f"G1 A{A0:.3f} F30000"]
     assert validate_gcode(ok, CFG, M, z_axis=Z_DOWN) == []
     # pen already confirmed up (no Z move in the batch): no extra wait needed

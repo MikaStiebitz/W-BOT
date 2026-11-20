@@ -1,4 +1,4 @@
-// Kalibrier-Overlay für die Brettansicht: nummerierte Zielpunkte, Messabweichung und Restfehler-Pfeile (×20).
+// Calibration overlay for the board view: numbered target points, measurement deviation and residual-error arrows (×20).
 export const CAL_SCALE = 20;
 
 function arrow(ctx, x0, y0, x1, y1) {
@@ -11,14 +11,14 @@ function arrow(ctx, x0, y0, x1, y1) {
   ctx.stroke();
 }
 
-/** Wird aus board.draw() innerhalb des Clips aufgerufen. */
+/** Called from board.draw() inside the clip. */
 export function drawCalibration(ctx, w2s, th, calib, view, W, RL = 0) {
   if (!calib?.targets?.length) return;
   const cs = getComputedStyle(document.documentElement);
   const danger = cs.getPropertyValue('--danger').trim() || '#c0271f', ok = cs.getPropertyValue('--ok').trim() || '#1b7f3b';
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
 
-  // gestrichelt: Messung minus Soll, ×20 (vor der Auswertung sichtbar)
+  // dashed: measured minus target, ×20 (visible before the fit)
   ctx.setLineDash([3, 3]); ctx.lineWidth = 1.2; ctx.strokeStyle = th.truth;
   calib.targets.forEach(([x, y], i) => {
     const m = calib.measured[i];
@@ -28,7 +28,7 @@ export function drawCalibration(ctx, w2s, th, calib, view, W, RL = 0) {
   });
   ctx.setLineDash([]);
 
-  // durchgezogen: Restfehler nach der Auswertung, ×20
+  // solid: residual error after the fit, ×20
   const res = calib.result;
   if (res && !res.stale) {
     ctx.lineWidth = 2;
@@ -41,7 +41,7 @@ export function drawCalibration(ctx, w2s, th, calib, view, W, RL = 0) {
     });
   }
 
-  // nummerierte Zielpunkte
+  // numbered target points
   ctx.font = `600 11px ${th.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   calib.targets.forEach(([x, y], i) => {
     const [sx, sy] = w2s(x, y), hot = calib.hot === i, filled = !!calib.measured[i];
@@ -52,11 +52,11 @@ export function drawCalibration(ctx, w2s, th, calib, view, W, RL = 0) {
     ctx.fillStyle = filled ? '#fff' : th.ink; ctx.fillText(String(i + 1), sx, sy + 0.5);
   });
 
-  // Legende
+  // Legend
   const bw0 = 262, lx = (W + RL) / 2 + bw0 / 2, ly = 14;
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.font = `12px ${th.font}`; ctx.fillStyle = th.ink;
-  const lines = [['gestrichelt: Messung − Soll', th.truth, true], ['Pfeil: Restfehler nach Auswertung', th.accent, false],
-    [`Beides ${CAL_SCALE}-fach vergrößert`, null, false]];
+  const lines = [['dashed: measured − target', th.truth, true], ['arrow: residual error after fit', th.accent, false],
+    [`Both magnified ${CAL_SCALE}×`, null, false]];
   const bw = bw0, bh = lines.length * 18 + 8;
   ctx.fillStyle = cs.getPropertyValue('--surface').trim(); ctx.globalAlpha = .9;
   ctx.fillRect(lx - bw, ly - 10, bw, bh); ctx.globalAlpha = 1;

@@ -1,12 +1,12 @@
-// Kamera-Grundlagen für die UI: Bildschleife (ein Abruf zur Zeit, passt sich der Leitung an) und Projektion Tafel <-> Bild.
-// Projektion wie wbot/camera/geometry.py: Tafel (mm, z vor der Tafel) -> Homographie H -> entzerrte Pixel -> Objektivmodell -> Rohpixel.
+// Camera basics for the UI: frame loop (one request at a time, adapts to the connection) and board <-> image projection.
+// Projection as in wbot/camera/geometry.py: board (mm, z in front) -> homography H -> undistorted px -> lens model -> raw px.
 import { store } from './store.js';
 import { api } from './api.js';
 
-/** Bildschleife: holt /api/camera/frame.jpg und liefert ImageBitmaps. Pausiert, solange niemand zusieht. */
+/** Frame loop: fetches /api/camera/frame.jpg and delivers ImageBitmaps. Pauses while nobody watches. */
 export function frameLoop({ view = 'raw', width = null, fps = 10, onFrame, onError, quality = 72 }) {
   let on = false, busy = false, timer = null, lastErr = 0;
-  const period = () => 1000 / Math.max(1, fps);
+  const period = () => 1000 / Math.max(1, typeof fps === 'function' ? fps() : fps);
   async function tick() {
     timer = null;
     if (!on || busy) return;
@@ -17,7 +17,7 @@ export function frameLoop({ view = 'raw', width = null, fps = 10, onFrame, onErr
       const w = typeof width === 'function' ? width() : width;
       const res = await fetch(`/api/camera/frame.jpg?view=${view}&q=${quality}${w ? `&w=${Math.round(w)}` : ''}`, { cache: 'no-store' });
       if (!res.ok) {
-        let msg = `Kamerabild nicht verfügbar (${res.status}).`;
+        let msg = `Camera picture not available (${res.status}).`;
         try { msg = (await res.json()).error || msg; } catch { /* kein JSON */ }
         throw Object.assign(new Error(msg), { status: res.status });
       }
@@ -25,6 +25,7 @@ export function frameLoop({ view = 'raw', width = null, fps = 10, onFrame, onErr
       const bmp = await createImageBitmap(blob);
       onFrame?.(bmp, { seq: Number(res.headers.get('X-Frame-Seq')), t: Number(res.headers.get('X-Frame-T')) });
     } catch (e) {
+      if (e instanceof TypeError) e = new Error('Camera picture not reachable (server restarting?). Retrying ...');
       if (Date.now() - lastErr > 3000) { lastErr = Date.now(); onError?.(e); }
       busy = false;
       if (on) timer = setTimeout(tick, 1500);
@@ -57,14 +58,14 @@ function distort(g, u, v) {
 function undistort(g, u, v) {
   if (!g.K || !g.dist) return [u, v];
   let [x, y] = [u, v];
-  for (let i = 0; i < 12; i++) {           // Fixpunkt-Iteration, für Webcam-Verzeichnung genau genug
+  for (let i = 0; i < 12; i++) {           // fixed-point iteration, accurate enough for webcam distortion
     const [du, dv] = distort(g, x, y);
     x += u - du; y += v - dv;
   }
   return [x, y];
 }
 
-/** Tafelpunkt (mm, Höhe z vor der Tafel) -> Rohbild-Pixel, oder null hinter dem Horizont. */
+/** Board point (mm, height z in front of the board) -> raw image px, or null behind the horizon. */
 export function toImage(g, x, y, z = 0) {
   if (!g) return null;
   if (z) { const c = g.center, k = c[2] / (c[2] - z); x = c[0] + (x - c[0]) * k; y = c[1] + (y - c[1]) * k; }
@@ -73,7 +74,7 @@ export function toImage(g, x, y, z = 0) {
   return distort(g, u, v);
 }
 
-/** Rohbild-Pixel -> Tafelpunkt (mm) auf der Tafel. */
+/** Raw image px -> board point (mm) on the board. */
 export function toBoard(g, u, v) {
   if (!g) return null;
   const [uu, vv] = undistort(g, u, v);
@@ -81,7 +82,7 @@ export function toBoard(g, u, v) {
   return Number.isFinite(x) && w !== 0 ? [x, y] : null;
 }
 
-/** Polylinie (mm) ins Bild, dicht abgetastet (gerade Tafellinien werden durch das Objektiv krumm). */
+/** Polyline (mm) into the image, densely sampled (straight board lines bend through the lens). */
 export function polyToImage(g, pts, step = 25) {
   const out = [];
   for (let i = 0; i < pts.length; i++) {
@@ -95,7 +96,7 @@ export function polyToImage(g, pts, step = 25) {
   return out;
 }
 
-/** Kamera-Info neu laden (still). */
+/** Reload the camera info (quietly). */
 export async function refreshCamera() {
   try { store.set({ camera: await api.camera({ quiet: true }) }); } catch { /* Server weg: egal */ }
   return store.get('camera');

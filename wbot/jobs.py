@@ -47,8 +47,24 @@ class JobManager:
         try:
             d = svg_to_drawing(data, self.m.cfg, name=name)
         except Exception as exc:  # noqa: BLE001
-            raise MachineError(f"SVG konnte nicht gelesen werden: {exc}", "bad_svg", 400) from exc
+            raise MachineError(f"The SVG could not be read: {exc}", "bad_svg", 400) from exc
         return {"drawing": d.to_json()}
+
+    def import_image(self, data: bytes, name: str, options: dict | None = None) -> dict:
+        """Trace a raster image into pen paths. Options: mode, detail, invert, use_pen_colors, pen, threshold."""
+        from .imagetrace import ImageError, TraceOptions, trace_image
+        from .machine import MachineError
+        o = options or {}
+        try:
+            t = TraceOptions(mode=str(o.get("mode", "auto")), detail=int(o.get("detail", 50)),
+                             invert=bool(o.get("invert", False)), use_pen_colors=bool(o.get("use_pen_colors", False)),
+                             pen=int(o.get("pen", 0)), threshold=None if o.get("threshold") is None else int(o["threshold"]),
+                             pen_widths_mm=[c.width_mm for c in self.m.cfg.colors])
+            res = trace_image(data, self.m.cfg, t)
+        except (ImageError, ValueError) as exc:
+            raise MachineError(str(exc), "bad_image", 400) from exc
+        res.drawing.name = name
+        return {"drawing": res.drawing.to_json(), "info": res.info, "warnings": res.warnings}
 
     def resolve(self, body: dict) -> Drawing:
         from .machine import MachineError
@@ -60,11 +76,11 @@ class JobManager:
                 pat = body["pattern"]
                 d = build_pattern(cfg, pat.get("id"), pat.get("params") or {})
             else:
-                raise MachineError("Weder Testbild noch Zeichnung angegeben.", "bad_request", 400)
+                raise MachineError("Neither a test pattern nor a drawing was specified.", "bad_request", 400)
         except MachineError:
             raise
         except (ValueError, KeyError) as exc:
-            raise MachineError(f"Ungültige Angaben: {exc}", "bad_request", 400) from exc
+            raise MachineError(f"Invalid input: {exc}", "bad_request", 400) from exc
         lay = body.get("layout") or {}
         if lay:
             if lay.get("fit"):
@@ -83,11 +99,13 @@ class JobManager:
     def preview(self, body: dict) -> dict:
         d = self.resolve(body)
         mp, real = self._mapping()
-        opts = PlanOptions(dry_run=bool(body.get("dry_run")), speed_scale=float(body.get("speed_scale") or 1.0))
+        live = bool(body.get("live"))
+        opts = PlanOptions(dry_run=bool(body.get("dry_run")), speed_scale=float(body.get("speed_scale") or 1.0),
+                           optimize=not live, park_at_end=not live)
         p = make_plan(d, self.m.cfg, mp, opts)
         warnings = list(p.warnings)
         if not real:
-            warnings.append("Keine Referenz gesetzt - Zeitschaetzung mit angenommener Referenz.")
+            warnings.append("No reference set - time estimate uses an assumed reference.")
         return {"drawing": d.to_json(), "bounds": [float(v) for v in d.bounds()],
                 "estimated_s": float(p.estimated_s), "warnings": warnings, "stats": p.stats}
 
@@ -100,11 +118,13 @@ class JobManager:
             mp = m._need_reference()
             ms, _ = m.machine_state()
             if ms != "idle":
-                raise MachineError("Maschine ist nicht bereit (Idle erforderlich).", "not_idle")
+                raise MachineError("The machine is not ready (Idle required).", "not_idle")
             d = self.resolve(body)
             slot = m.revolver_slot()
+            live = bool(body.get("live"))
             opts = PlanOptions(dry_run=bool(body.get("dry_run")),
                                speed_scale=float(body.get("speed_scale") or 1.0),
+                               optimize=not live, park_at_end=not live,
                                start_phys=m.phys_xy(),
                                current_slot=None if slot is None else slot - 1)
             plan = make_plan(d, m.cfg, mp, opts)
@@ -113,7 +133,7 @@ class JobManager:
                                       start_outside=m.outside_safe_rect())
             if problems:
                 p = problems[0]
-                raise MachineError(f"Sicherheitsprüfung der Zeichnung: {p.message} (Zeile {p.index + 1})",
+                raise MachineError(f"Safety check of the drawing: {p.message} (line {p.index + 1})",
                                    "unsafe", 422)
         self._plan, self._intended = plan, d
         emu = m._emulator()
@@ -125,8 +145,8 @@ class JobManager:
         self._t0 = time.monotonic()
         self._thread = threading.Thread(target=self._run, args=(lines,), name="job", daemon=True)
         self._thread.start()
-        m.log("info", f"Job '{self.job['name']}' gestartet ({len(lines)} Zeilen, ~{plan.estimated_s:.0f} s)"
-                      f"{' [Trockenlauf]' if opts.dry_run else ''}.")
+        m.log("info", f"Job '{self.job['name']}' started ({len(lines)} lines, ~{plan.estimated_s:.0f} s)"
+                      f"{' [dry run]' if opts.dry_run else ''}.")
         self._publish()
         return dict(self.job)
 
@@ -153,18 +173,18 @@ class JobManager:
                     self._finish_cancel()
                     return
                 if not getattr(res, "ok", True):
-                    raise RuntimeError(f"Controller-Fehler: {getattr(res, 'message', '') or getattr(res, 'status', 'unbekannt')}")
+                    raise RuntimeError(f"Controller error: {getattr(res, 'message', '') or getattr(res, 'status', 'unknown')}")
                 if not m.client.wait_idle(timeout=600.0, cancel=self._cancel):
                     if self._cancel.is_set():
                         self._finish_cancel()
                         return
-                    raise RuntimeError("Zeitüberschreitung beim Warten auf das Jobende.")
+                    raise RuntimeError("Timed out waiting for the job to finish.")
             job["state"], job["progress"], job["eta_s"] = "done", 1.0, 0.0
-            m.log("info", f"Job '{job['name']}' fertig.")
+            m.log("info", f"Job '{job['name']}' finished.")
         except Exception as exc:  # noqa: BLE001
             if job["state"] not in ("cancelled",):
                 job["state"], job["message"] = "error", str(exc)
-                m.log("error", f"Job abgebrochen: {exc}")
+                m.log("error", f"Job aborted: {exc}")
         finally:
             self._publish()
 
@@ -172,15 +192,15 @@ class JobManager:
         m, job = self.m, self.job
         if job["state"] == "error":                  # link_lost() already reported the real cause
             return
-        job["state"], job["message"] = "cancelled", "Abgebrochen"
-        m.log("warn", "Job abgebrochen - Stift wird gehoben.")
+        job["state"], job["message"] = "cancelled", "Cancelled"
+        m.log("warn", "Job cancelled - lifting the pen.")
         try:
             st, _ = m.machine_state()
             if st == "alarm":
                 m.client.unlock()
             m._send_lines(m._servo_lines("pen", m.cfg.servos.pen.up_deg))
         except Exception as exc:  # noqa: BLE001
-            m.log("error", f"Stift heben nach Abbruch fehlgeschlagen: {exc}")
+            m.log("error", f"Lifting the pen after the cancel failed: {exc}")
 
     # ---------------------------------------------------------------- controls
     def cancel(self) -> None:
@@ -200,13 +220,13 @@ class JobManager:
     def on_estop(self) -> None:
         if self.running:
             self._cancel.set()
-            self.job["state"], self.job["message"] = "cancelled", "Not-Halt"
+            self.job["state"], self.job["message"] = "cancelled", "Emergency stop"
             self._publish()
 
     def link_lost(self) -> None:
         if self.running:
             self._cancel.set()
-            self.job["state"], self.job["message"] = "error", "Verbindung verloren"
+            self.job["state"], self.job["message"] = "error", "Connection lost"
             self._publish()
 
     def abort_on_disconnect(self) -> None:

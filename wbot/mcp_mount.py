@@ -49,22 +49,22 @@ class MountedMcp:
     def _guard(self, scope: Scope) -> JSONResponse | None:
         cfg = self.machine.cfg
         if not cfg.mcp.enabled:
-            return JSONResponse({"error": "MCP-Steuerung ist in der Konfiguration (mcp.enabled) deaktiviert.",
+            return JSONResponse({"error": "MCP control is disabled in the configuration (mcp.enabled).",
                                  "code": "mcp_disabled"}, status_code=503)
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
         token = os.environ.get(TOKEN_ENV)
         if token:
             given = headers.get("authorization", "")
             if not hmac.compare_digest(given.encode(), f"Bearer {token}".encode()):
-                return JSONResponse({"error": "Ungültiges oder fehlendes MCP-Token.", "code": "unauthorized"},
+                return JSONResponse({"error": "Invalid or missing MCP token.", "code": "unauthorized"},
                                     status_code=401, headers={"WWW-Authenticate": "Bearer"})
             return None
         allowed = LOOPBACK | {cfg.api.host.lower()}
         host = _hostname(headers.get("host", ""))
         origin = headers.get("origin")
         if host not in allowed or (origin and _hostname(origin) not in allowed):
-            return JSONResponse({"error": "Host/Origin nicht erlaubt (Schutz gegen DNS-Rebinding). Für Zugriff "
-                                          f"von anderen Adressen die Umgebungsvariable {TOKEN_ENV} setzen.",
+            return JSONResponse({"error": "Host/Origin not allowed (DNS-rebinding protection). To allow access "
+                                          f"from other addresses, set the environment variable {TOKEN_ENV}.",
                                  "code": "forbidden_host"}, status_code=421 if host not in allowed else 403)
         return None
 
@@ -129,11 +129,11 @@ class MountedMcp:
             try:
                 handler = await self._ensure()
             except ImportError as exc:
-                reply = JSONResponse({"error": f"MCP-Paket nicht installiert ({exc}). pip install mcp",
+                reply = JSONResponse({"error": f"MCP package not installed ({exc}). pip install mcp",
                                       "code": "mcp_missing"}, status_code=503)
             except Exception as exc:  # noqa: BLE001
                 log.exception("MCP server could not start")
-                reply = JSONResponse({"error": f"MCP-Server konnte nicht starten: {exc}", "code": "mcp_failed"},
+                reply = JSONResponse({"error": f"The MCP server could not start: {exc}", "code": "mcp_failed"},
                                      status_code=503)
         if reply is not None:
             await reply(scope, receive, send)

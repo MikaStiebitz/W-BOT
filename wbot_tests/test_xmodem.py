@@ -206,7 +206,7 @@ def test_lost_ack_causes_resend_and_receiver_dedups():
 
 def test_too_many_naks_aborts_with_can():
     rx = FakeReceiver(corrupt_packets=1000)
-    with pytest.raises(XmodemError, match="Versuche"):
+    with pytest.raises(XmodemError, match="attempts"):
         upload_config(rx, TEXT, max_retries=3, **FAST)
     assert bytes([CAN, CAN, CAN]) in rx.writes
 
@@ -219,7 +219,7 @@ def test_receiver_cancel():
 
 def test_no_start_character_times_out():
     rx = FakeReceiver(start=False)
-    with pytest.raises(XmodemError, match="startet XMODEM nicht"):
+    with pytest.raises(XmodemError, match="does not start XMODEM"):
         upload_config(rx, TEXT, start_timeout=0.15, ack_timeout=0.05, response_timeout=0.1, timeout=5)
 
 
@@ -251,7 +251,7 @@ def test_response_text_is_returned_and_error_raises():
     rx = FakeReceiver(final=b"[MSG:INFO: Config saved]\r\nok\r\n")
     out = upload_config(rx, TEXT, **FAST)
     assert "Config saved" in out and "ok" in out
-    with pytest.raises(XmodemError, match="Fehler"):
+    with pytest.raises(XmodemError, match="reports an error"):
         upload_config(FakeReceiver(final=b"error:20\r\n"), TEXT, **FAST)
 
 

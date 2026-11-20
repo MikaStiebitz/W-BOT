@@ -1,4 +1,4 @@
-// Kopfzeile: Verbindung, Zustand, Positionen, Not-Halt, Alarm-Banner, Theme.
+// Header: brand, one connect button (details in a popover), status, theme, emergency stop, dismissible banners.
 import { h, fmt, lsSet, clear } from '../util.js';
 import { icon, logo } from '../icons.js';
 import { store } from '../store.js';
@@ -8,10 +8,10 @@ import { segmented } from '../widgets.js';
 import { caps, MACHINE_LABEL, alarmText } from '../caps.js';
 import { connectBody } from '../simopts.js';
 
-const THEMES = [['auto', 'Auto', 'auto'], ['light', 'Hell', 'sun'], ['dark', 'Dunkel', 'moon']];
+const THEMES = [['auto', 'Auto', 'auto'], ['light', 'Light', 'sun'], ['dark', 'Dark', 'moon']];
 
 export function triggerEstop() {
-  toast('NOT-HALT ausgelöst', 'error', 3000);
+  toast('EMERGENCY STOP', 'error', 3000);
   api.estop().catch(() => {});
 }
 
@@ -23,46 +23,55 @@ export function setTheme(t) {
 }
 
 export function mountHeader(root) {
-  /* ----- Zeile 1: Marke, Verbindung, Theme ----- */
+  /* ----- Connection options (popover) ----- */
   const transportSeg = segmented({
-    label: 'Verbindungsart', value: 'sim',
-    options: [{ value: 'sim', label: 'Simulator' }, { value: 'serial', label: 'Seriell' },
-      { value: 'wifi', label: 'WLAN', title: 'Board über WLAN (Telnet/WebSocket) – ohne Kabel' }],
+    label: 'Connection type', value: 'sim', fill: true,
+    options: [{ value: 'sim', label: 'Simulator' }, { value: 'serial', label: 'USB' },
+      { value: 'wifi', label: 'Wi-Fi', title: 'Board over Wi-Fi (Telnet/WebSocket), no cable' }],
     onChange: (v) => store.set({ transport: v }),
   });
   const SPEEDS = [1, 5, 20, 60];
-  const speedSeg = segmented({ label: 'Simulator-Tempo', value: store.get('simOpts')?.speed ?? 1,
-    options: SPEEDS.map((v) => ({ value: v, label: `${v}×`, title: v === 1 ? 'Echtzeit' : `${v}-fach beschleunigt` })),
+  const speedSeg = segmented({ label: 'Simulator speed', value: store.get('simOpts')?.speed ?? 1, fill: true,
+    options: SPEEDS.map((v) => ({ value: v, label: `${v}×`, title: v === 1 ? 'Real time' : `${v}× faster` })),
     onChange: (v) => { const o = { ...store.get('simOpts'), speed: v }; store.set({ simOpts: o }); lsSet('wbot-simopts', o); } });
-  const speedWrap = h('div', { class: 'conn-speed' }, h('span', { class: 'field-label' }, 'Tempo'), speedSeg.el);
-  const portSel = h('select', { 'aria-label': 'Serieller Port', onChange: (e) => store.set({ port: e.target.value || null }) });
-  const portRefresh = h('button', { class: 'btn icon-only', type: 'button', title: 'Portliste aktualisieren', 'aria-label': 'Portliste aktualisieren',
+  const speedWrap = h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Simulator speed'), speedSeg.el);
+  const portSel = h('select', { 'aria-label': 'USB port', onChange: (e) => store.set({ port: e.target.value || null }) });
+  const portRefresh = h('button', { class: 'btn icon-only', type: 'button', title: 'Refresh the port list', 'aria-label': 'Refresh the port list',
     onClick: () => run(portRefresh, async () => store.set({ ports: await api.ports() })) }, icon('refresh'));
-  const wifiHost = h('input', { type: 'text', class: 'conn-host', 'aria-label': 'Host oder IP des Boards', placeholder: 'fluidnc.local',
-    autocomplete: 'off', spellcheck: 'false', maxlength: '120', value: store.get('wifi')?.host ?? 'fluidnc.local',
-    title: 'Hostname oder IP-Adresse des Boards, optional mit :Port (kein Passwort nötig – FluidNC-Telnet/WebSocket haben keine Anmeldung)' });
-  const wifiProto = h('select', { 'aria-label': 'WLAN-Protokoll', title: 'Telnet (Port 23) oder WebSocket (Port 81)' },
+  const portRow = h('div', { class: 'row', style: { alignItems: 'center' } }, h('div', { class: 'field', style: { flex: '1' } }, h('span', { class: 'field-label' }, 'USB port'), portSel), portRefresh);
+  const wifiHost = h('input', { type: 'text', 'aria-label': 'Board host or IP', placeholder: 'fluidnc.local', autocomplete: 'off', spellcheck: 'false', maxlength: '120',
+    value: store.get('wifi')?.host ?? 'fluidnc.local', title: 'Host name or IP of the board, optionally with :port. No password needed.' });
+  const wifiProto = h('select', { 'aria-label': 'Wi-Fi protocol', title: 'Telnet (port 23) or WebSocket (port 81)' },
     h('option', { value: 'telnet' }, 'Telnet'), h('option', { value: 'websocket' }, 'WebSocket'));
   wifiProto.value = store.get('wifi')?.protocol === 'websocket' ? 'websocket' : 'telnet';
   const saveWifi = () => { const w = { host: wifiHost.value.trim(), protocol: wifiProto.value }; store.set({ wifi: w }); lsSet('wbot-wifi', w); };
   wifiHost.addEventListener('input', saveWifi);
   wifiProto.addEventListener('change', saveWifi);
   wifiHost.addEventListener('keydown', (e) => { if (e.key === 'Enter') connBtn.click(); e.stopPropagation(); });
-  const connBtn = h('button', { class: 'btn primary', type: 'button', style: { minWidth: '130px' } });
-  const connInfo = h('span', { class: 'chip conn-info' });
+  const wifiRow = h('div', { class: 'row', style: { alignItems: 'flex-end' } }, h('div', { class: 'field', style: { flex: '2 1 150px' } }, h('span', { class: 'field-label' }, 'Board address'), wifiHost),
+    h('div', { class: 'field', style: { flex: '1 1 100px' } }, h('span', { class: 'field-label' }, 'Protocol'), wifiProto));
+  const connNote = h('p', { class: 'field-hint' });
+  const pop = h('div', { class: 'conn-pop', hidden: true, role: 'dialog', 'aria-label': 'Connection options' }, transportSeg.el, portRow, wifiRow, speedWrap, connNote);
+
+  const connBtn = h('button', { class: 'btn primary', type: 'button', style: { minWidth: '118px' } });
+  const optBtn = h('button', { class: 'btn icon-only', type: 'button', title: 'Connection options', 'aria-label': 'Connection options', 'aria-expanded': 'false',
+    onClick: () => { pop.hidden = !pop.hidden; optBtn.setAttribute('aria-expanded', String(!pop.hidden)); } }, icon('gear'));
+  document.addEventListener('pointerdown', (e) => { if (!pop.hidden && !pop.contains(e.target) && !optBtn.contains(e.target)) { pop.hidden = true; optBtn.setAttribute('aria-expanded', 'false'); } });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !pop.hidden) { pop.hidden = true; optBtn.setAttribute('aria-expanded', 'false'); } });
 
   connBtn.addEventListener('click', () => run(connBtn, async () => {
     const st = store.get('state');
-    if (st?.connection?.status === 'connected') { await api.disconnect(); toast('Getrennt.', 'info'); return; }
+    if (st?.connection?.status === 'connected') { await api.disconnect(); toast('Disconnected.', 'info'); return; }
+    pop.hidden = true;
     await api.connect(connectBody());
-    toast('Verbunden.', 'ok');
+    toast('Connected.', 'ok');
   }));
 
-  const themeBtn = h('button', { class: 'btn sm theme-btn', type: 'button', title: 'Farbschema wechseln' });
+  const themeBtn = h('button', { class: 'btn icon-only theme-btn', type: 'button', title: 'Switch theme' });
   const paintTheme = () => {
     const cur = THEMES.find((t) => t[0] === currentTheme()) || THEMES[0];
-    clear(themeBtn).append(icon(cur[2]), h('span', { class: 'lbl' }, cur[1]));
-    themeBtn.setAttribute('aria-label', `Farbschema: ${cur[1]}`);
+    clear(themeBtn).append(icon(cur[2]));
+    themeBtn.setAttribute('aria-label', `Theme: ${cur[1]}`); themeBtn.title = `Theme: ${cur[1]} (click to switch)`;
   };
   themeBtn.addEventListener('click', () => {
     const i = THEMES.findIndex((t) => t[0] === currentTheme());
@@ -71,43 +80,34 @@ export function mountHeader(root) {
   });
   paintTheme();
 
-  const r1 = h('div', { class: 'top-r1' },
-    h('div', { class: 'brand' }, logo(), h('span', null, 'W-BOT'), h('small', null, 'Wandplotter')),
-    h('div', { class: 'conn' }, transportSeg.el, portSel, portRefresh, wifiHost, wifiProto, speedWrap, connBtn, connInfo),
-    h('span', { class: 'top-sp' }),
-    themeBtn);
-
-  /* ----- Zeile 2: Anzeigen ----- */
+  /* ----- Status ----- */
   const badge = h('span', { class: 'state-badge', 'data-state': 'disconnected', 'aria-live': 'polite' });
-  const ro = (label) => { const v = h('span', { class: 'ro-v' }); return { v, el: h('div', { class: 'ro' }, h('span', { class: 'ro-l' }, label), v) }; };
-  const phys = ro('Physisch (mm)'), fw = ro('Firmware (mm)'), pen = ro('Stift'), rev = ro('Revolver');
-  const refChip = h('span', { class: 'chip' });
+  const info = h('span', { class: 'muted conn-info', style: { fontSize: '13px' } });
+  const pos = h('span', { class: 'chip pos-chip', title: 'Gondola position on the board' });
   const wsChip = h('span', { class: 'chip' });
-  const r2 = h('div', { class: 'top-r2' }, badge, phys.el, fw.el, pen.el, rev.el, refChip, h('span', { class: 'top-sp' }), wsChip);
 
-  /* ----- Not-Halt ----- */
-  const estop = h('button', { class: 'estop', type: 'button', 'aria-label': 'Not-Halt (Leertaste)', title: 'Not-Halt – Taste: Leertaste',
-    onClick: triggerEstop }, 'NOT-', h('br'), 'HALT', h('small', null, 'Leertaste'));
+  const r1 = h('div', { class: 'top-r1' },
+    h('div', { class: 'brand' }, logo(), h('span', null, 'W-BOT')),
+    h('div', { class: 'conn' }, connBtn, optBtn, pop),
+    badge, info, pos, wsChip,
+    h('span', { class: 'top-sp' }), themeBtn);
+
+  const estop = h('button', { class: 'estop', type: 'button', 'aria-label': 'Emergency stop (space bar)', title: 'Emergency stop. Shortcut: space bar',
+    onClick: triggerEstop }, 'STOP', h('small', null, 'Space'));
   const es = h('div', { class: 'top-es' }, estop);
+  const banners = h('div', { class: 'top-bn', role: 'region', 'aria-label': 'Notices' });
+  root.append(r1, es, banners);
 
-  const banners = h('div', { class: 'top-bn', role: 'region', 'aria-label': 'Hinweise' });
-  root.append(r1, r2, es, banners);
-
-  function xy(el, p, dec) {
-    clear(el.v);
-    if (!p) { el.v.className = 'ro-v dim'; el.v.textContent = 'unbekannt'; return; }
-    el.v.className = 'ro-v';
-    el.v.append(h('span', { class: 'ax' }, 'X'), fmt(p[0], dec), '  ', h('span', { class: 'ax' }, 'Y'), fmt(p[1], dec));
-  }
-
-  function bannerRow(cls, text, ...actions) {
-    return h('div', { class: 'banner ' + cls, role: cls === 'alarm' ? 'alert' : undefined }, h('span', { class: 'grow' }, text), ...actions);
+  /* ----- Banners: accurate, short, dismissible (the alarm one stays until fixed) ----- */
+  const dismissed = new Set();
+  function bannerRow(key, cls, text, ...actions) {
+    const x = cls === 'alarm' ? null : h('button', { class: 'banner-x', type: 'button', 'aria-label': 'Dismiss', title: 'Dismiss', onClick: () => { dismissed.add(key); update(); } }, '×');
+    return h('div', { class: 'banner ' + cls, role: cls === 'alarm' ? 'alert' : undefined }, h('span', { class: 'grow' }, text), ...actions, x);
   }
 
   function update() {
     const s = store.get('state'), cfg = store.get('config'), job = store.get('job');
-    const c = caps(s, job);
-    const conn = s?.connection;
+    const c = caps(s, job), conn = s?.connection;
     const connected = c.connected, connecting = conn?.status === 'connecting';
 
     const transport = connected ? conn.transport : (store.get('transport') || cfg?.connection?.transport || 'sim');
@@ -117,73 +117,57 @@ export function mountHeader(root) {
     const want = store.get('port') || cfg?.connection?.serial?.port || '';
     if (portSel._sig !== JSON.stringify([ports, want])) {
       portSel._sig = JSON.stringify([ports, want]);
-      clear(portSel).append(h('option', { value: '' }, ports.length ? 'Port wählen …' : 'Keine Ports gefunden'),
+      clear(portSel).append(h('option', { value: '' }, ports.length ? 'Choose a port …' : 'No ports found'),
         ...ports.map((p) => h('option', { value: p.device }, p.description ? `${p.device} – ${p.description}` : p.device)));
       portSel.value = ports.some((p) => p.device === want) ? want : '';
     }
-    portSel.hidden = portRefresh.hidden = transport !== 'serial';
+    portRow.hidden = transport !== 'serial';
     speedWrap.hidden = transport !== 'sim';
-    wifiHost.hidden = wifiProto.hidden = transport !== 'wifi';
-    wifiHost.disabled = wifiProto.disabled = connected || connecting;
+    wifiRow.hidden = transport !== 'wifi';
+    wifiHost.disabled = wifiProto.disabled = portSel.disabled = connected || connecting;
     speedSeg.set(store.get('simOpts')?.speed ?? 1);
     speedSeg.buttons.forEach((b) => { b.disabled = connected || connecting; });
-    portSel.disabled = connected || connecting;
-    gate(portRefresh, connected ? 'Erst trennen.' : '');
+    gate(portRefresh, connected ? 'Disconnect first.' : '');
+    connNote.textContent = connected ? 'Disconnect to change the connection.' : 'The simulator is the safe default. Real hardware is only opened when you connect to it.';
 
-    connBtn.textContent = connected ? 'Trennen' : (connecting ? 'Verbinde …' : 'Verbinden');
+    const label = transport === 'sim' ? 'Simulator' : transport === 'wifi' ? 'Wi-Fi' : 'USB';
+    connBtn.textContent = connected ? 'Disconnect' : (connecting ? 'Connecting …' : `Connect · ${label}`);
     connBtn.classList.toggle('primary', !connected);
-    gate(connBtn, !connected && transport === 'serial' && !portSel.value ? 'Erst einen Port wählen.'
-      : !connected && transport === 'wifi' && !wifiHost.value.trim() ? 'Erst Host oder IP des Boards eintragen.'
-      : (connecting ? 'Verbindung wird aufgebaut …' : ''));
-    connInfo.hidden = !connected;
-    connInfo.textContent = connected ? `${conn.transport === 'sim' ? 'Simulator' : conn.transport === 'wifi' ? 'WLAN · ' + (conn.host || conn.port || '') : conn.port || 'seriell'}${conn.firmware ? ' · ' + conn.firmware : ''}` : '';
-    connInfo.className = 'chip conn-info ' + (connected ? 'ok' : '');
+    gate(connBtn, !connected && transport === 'serial' && !portSel.value ? 'Choose a USB port first (the gear button).'
+      : !connected && transport === 'wifi' && !wifiHost.value.trim() ? 'Enter the board address first (the gear button).'
+      : (connecting ? 'Connecting …' : ''));
 
     const ms = s?.machine?.state ?? 'disconnected';
     badge.dataset.state = ms;
     badge.textContent = MACHINE_LABEL[ms] || ms;
-    xy(phys, connected && s.reference?.set ? s.position?.physical : null, 1);
-    if (connected && !s.reference?.set) phys.v.textContent = 'keine Referenz';
-    xy(fw, connected ? s.position?.firmware : null, 2);
-    if (!connected) { phys.v.textContent = '–'; fw.v.textContent = '–'; }
-
-    if (connected && s.pen && s.pen.known === false) pen.v.textContent = 'unbekannt';
-    else if (connected && s.pen) pen.v.textContent = `${s.pen.up ? 'oben' : 'unten'} · ${fmt(s.pen.angle, 0)}°`; else pen.v.textContent = '–';
-    if (connected && s.revolver) {
-      const slot = s.revolver.slot, nm = slot ? cfg?.colors?.[slot - 1]?.name : null;
-      rev.v.textContent = slot ? `Slot ${slot}${nm ? ' · ' + nm : ''}` : `zwischen Slots · ${fmt(s.revolver.angle, 0)}°`;
-    } else rev.v.textContent = '–';
-    pen.v.className = 'ro-v' + (connected && s.pen && s.pen.known !== false && !s.pen.up ? '' : ' dim');
-    rev.v.className = 'ro-v' + (connected ? '' : ' dim');
-
-    refChip.hidden = !connected;
-    const r = s?.reference;
-    refChip.className = 'chip ' + (r?.uncertain || r?.restored ? 'warn' : r?.set ? 'ok' : 'warn');
-    refChip.textContent = r?.uncertain ? 'Referenz unsicher' : r?.restored ? 'Referenz wiederhergestellt' : r?.set ? 'Referenz gesetzt' : 'Keine Referenz';
+    info.textContent = connected ? `${conn.transport === 'sim' ? 'Simulator' : conn.transport === 'wifi' ? (conn.host || conn.port || 'Wi-Fi') : (conn.port || 'USB')}${conn.firmware ? ' · ' + conn.firmware : ''}` : '';
+    const p = connected && s.reference?.set ? s.position?.physical : null;
+    pos.hidden = !connected;
+    pos.className = 'chip pos-chip ' + (p ? '' : 'warn');
+    pos.textContent = p ? `X ${fmt(p[0], 0)} · Y ${fmt(p[1], 0)}` : 'Position unknown';
+    pos.title = p ? 'Gondola position on the board (mm)' : 'Set the gondola position in Setup or Move';
 
     const ws = store.get('ws');
     wsChip.hidden = ws === 'open';
-    wsChip.className = 'chip ' + (ws === 'open' ? 'ok' : 'danger');
-    wsChip.textContent = ws === 'open' ? 'Live' : ws === 'connecting' ? 'Verbinde zum Server …' : 'Server getrennt – verbinde neu …';
+    wsChip.className = 'chip danger';
+    wsChip.textContent = ws === 'connecting' ? 'Connecting to the server …' : 'Server not reachable';
 
-    /* Banner (nur neu aufbauen, wenn sich der Inhalt ändert - sonst gehen Klicks verloren) */
     const items = [];
-    if (ms === 'alarm') items.push(['alarm', alarmText(s.machine.alarm) || 'Alarm aktiv.']);
-    if (conn?.status === 'error' && conn.error) items.push(['err', conn.error]);
-    if (ws !== 'open' && s) items.push(['err', 'Live-Verbindung zum Server unterbrochen. Angezeigte Werte können veraltet sein. Die Seite verbindet automatisch neu.']);
-    const warns = s?.warnings || [];
-    if (connected && r?.uncertain && !warns.length) items.push(['warn', 'Referenz unsicher: Die Gondel steht eventuell nicht mehr an der erwarteten Stelle. Im Zweifel neu referenzieren.']);
-    else if (connected && r?.restored && !r?.uncertain) items.push(['warn', 'Die Referenz stammt aus der letzten Sitzung. Prüfen, ob die Gondel wirklich dort steht, sonst neu referenzieren.']);
-    for (const w of s?.warnings || []) items.push(['warn', w]);
-    const key = JSON.stringify(items);
+    if (ms === 'alarm') items.push(['alarm', 'alarm', alarmText(s.machine.alarm) || 'The machine is in alarm.']);
+    if (conn?.status === 'error' && conn.error) items.push(['conn:' + conn.error, 'err', conn.error]);
+    const r = s?.reference;
+    if (connected && r?.uncertain) items.push(['ref-uncertain', 'warn', 'The gondola may no longer be where the software thinks. Set the position again if in doubt.']);
+    for (const w of s?.warnings || []) items.push(['w:' + w, 'warn', w]);
+    const shown = items.filter(([k]) => !dismissed.has(k));
+    const key = JSON.stringify(shown);
     if (banners._key !== key) {
       banners._key = key;
       clear(banners);
-      for (const [cls, text] of items) {
-        banners.append(cls === 'alarm' ? bannerRow('alarm', text,
-          h('button', { class: 'btn sm', type: 'button', onClick: (e) => run(e.currentTarget, async () => { await api.unlock(); toast('Entsperrt ($X).', 'ok'); }) }, icon('unlock'), 'Entsperren ($X)'),
-          h('button', { class: 'btn sm', type: 'button', onClick: (e) => run(e.currentTarget, async () => { await api.reset(); toast('Zurückgesetzt.', 'info'); }) }, icon('refresh'), 'Reset'))
-          : bannerRow(cls, text));
+      for (const [k, cls, text] of shown) {
+        banners.append(cls === 'alarm' ? bannerRow(k, 'alarm', text,
+          h('button', { class: 'btn sm', type: 'button', onClick: (e) => run(e.currentTarget, async () => { await api.unlock(); toast('Unlocked.', 'ok'); }) }, icon('unlock'), 'Unlock'),
+          h('button', { class: 'btn sm', type: 'button', onClick: (e) => run(e.currentTarget, async () => { await api.reset(); toast('Controller reset.', 'info'); }) }, icon('refresh'), 'Reset'))
+          : bannerRow(k, cls, text));
       }
     }
   }

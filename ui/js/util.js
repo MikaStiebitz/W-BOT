@@ -1,4 +1,4 @@
-// Kleine Helfer: DOM-Builder, Formatierung, Timing. Keine Abhängigkeiten.
+// Small helpers: DOM builder, formatting, timing. No dependencies.
 
 export class ApiError extends Error {
   constructor(message, code = 'error', status = 0) {
@@ -17,7 +17,7 @@ export function fmt(n, d = 1) {
   if (n == null || typeof n !== 'number' || !Number.isFinite(n)) return '–';
   let f = nfCache.get(d);
   if (!f) {
-    f = new Intl.NumberFormat('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: false });
+    f = new Intl.NumberFormat('en-US', { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: false });
     nfCache.set(d, f);
   }
   return f.format(Object.is(n, -0) ? 0 : n);
@@ -38,7 +38,7 @@ export function debounce(fn, ms) {
   return f;
 }
 
-/** Leading + trailing throttle. flush() sendet sofort den letzten Wert. */
+/** Leading + trailing throttle. flush() sends the latest value immediately. */
 export function throttle(fn, ms) {
   let last = 0, timer = null, pending = null;
   const run = () => { timer = null; last = Date.now(); const a = pending; pending = null; if (a) fn(...a); };
@@ -92,13 +92,13 @@ export function isTyping(t) {
 export function lsGet(key, fallback = null) {
   try { const v = localStorage.getItem(key); return v == null ? fallback : JSON.parse(v); } catch { return fallback; }
 }
-export function lsSet(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch { /* privat/blockiert */ } }
+export function lsSet(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch { /* private mode or blocked */ } }
 
-/** Kopieren, auch auf unsicheren Origins (Tablet im WLAN, http://). */
+/** Copy to clipboard, including on insecure origins (tablet on Wi-Fi, http://). */
 export async function copyText(text) {
   try {
     if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; }
-  } catch { /* weiter mit Fallback */ }
+  } catch { /* fall through to the fallback */ }
   const ta = h('textarea', { style: { position: 'fixed', left: '-9999px', top: '0' }, 'aria-hidden': 'true' });
   ta.value = text;
   document.body.append(ta);
@@ -118,7 +118,7 @@ export function downloadBlob(text, filename, type = 'text/plain') {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-/** Wert aus verschachteltem Objekt per Pfad "a.b.c". */
+/** Value from a nested object by path "a.b.c". */
 export function getPath(o, path) { return path.split('.').reduce((a, k) => (a == null ? undefined : a[k]), o); }
 export function setPath(o, path, v) {
   const ks = path.split('.');

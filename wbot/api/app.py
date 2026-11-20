@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -79,6 +79,7 @@ class PlanBody(_Body):
     dry_run: bool = False
     speed_scale: float = 1.0
     name: str | None = None
+    live: bool = False            # live drawing: keep the stroke order and do not park after the job
 
 
 class Hub:
@@ -142,13 +143,13 @@ def create_app(machine: Machine | None = None, *, serve_ui: bool = True) -> Fast
     async def _validation(_: Request, exc: RequestValidationError) -> JSONResponse:
         first = exc.errors()[0] if exc.errors() else {}
         where = ".".join(str(p) for p in first.get("loc", ())[1:])
-        return JSONResponse({"error": f"Ungueltige Eingabe ({where}): {first.get('msg', '')}",
+        return JSONResponse({"error": f"Invalid input ({where}): {first.get('msg', '')}",
                              "code": "bad_request"}, status_code=422)
 
     @app.exception_handler(Exception)
     async def _unhandled(_: Request, exc: Exception) -> JSONResponse:
         log.exception("unhandled error")
-        return JSONResponse({"error": f"Interner Fehler: {exc}", "code": "internal"}, status_code=500)
+        return JSONResponse({"error": f"Internal error: {exc}", "code": "internal"}, status_code=500)
 
     async def run(fn, *a, **kw):
         """Machine calls block on hardware: keep the event loop free."""
@@ -233,6 +234,18 @@ def create_app(machine: Machine | None = None, *, serve_ui: bool = True) -> Fast
         data = await file.read()
         return await run(m.import_svg, data, file.filename or "svg")
 
+    @app.post("/api/import")
+    async def import_file(file: UploadFile = File(...), options: str = Form("{}")):
+        """SVG, PNG, JPEG, ... -> drawing. ``options`` is a JSON string (see jobs.import_image)."""
+        data = await file.read()
+        try:
+            opts = json.loads(options or "{}")
+            if not isinstance(opts, dict):
+                raise ValueError
+        except ValueError:
+            raise MachineError("The import options are not valid JSON.", "bad_request", 400) from None
+        return await run(m.import_file, data, file.filename or "image", opts)
+
     # --- config ------------------------------------------------------------------
     @app.get("/api/config")
     async def get_config():
@@ -303,8 +316,12 @@ def create_app(machine: Machine | None = None, *, serve_ui: bool = True) -> Fast
         @app.middleware("http")
         async def _hide_dev(request: Request, call_next):
             if request.url.path.startswith("/dev/"):       # mock backend sources: never served
-                return JSONResponse({"error": "Nicht gefunden", "code": "not_found"}, status_code=404)
-            return await call_next(request)
+                return JSONResponse({"error": "Not found", "code": "not_found"}, status_code=404)
+            response = await call_next(request)
+            if not request.url.path.startswith("/api/"):
+                # UI files: always revalidate, so a reload after an update never mixes old and new modules
+                response.headers.setdefault("Cache-Control", "no-cache")
+            return response
 
         app.mount("/", StaticFiles(directory=str(UI_DIR), html=True), name="ui")
     return app

@@ -6,27 +6,27 @@ board:
   width_mm: 1500
   height_mm: 1000
   margin_mm: 10
-  # Nutzbare Zeichenflaeche (siehe wbot/workspace.py): Motoren sitzen nur 41 mm ueber der Tafel und die Riemen
-  # greifen an der Gondel V2 176 mm UEBER dem Stift an: bei y = 1041 - 176 = 865 liegt der Angriffspunkt auf Hoehe
-  # der Scheibenmitte (Riemen waagerecht, Fehlerverstaerkung -> unendlich, Riemenkraft negativ). Darum endet die
-  # Zeichenflaeche bei y = 750 (Verstaerkung <= 3,9); in den unteren Ecken traegt der ferne Riemen nur ~0,3 N.
+  # Usable drawing area (see wbot/workspace.py): the motors sit only 41 mm above the board and the belts
+  # attach to gondola V2 176 mm ABOVE the pen: at y = 1041 - 176 = 865 the attach point is level with
+  # the pulley centre (belt horizontal, error gain -> infinity, belt force negative). So the
+  # drawing area ends at y = 750 (gain <= 3.9); in the lower corners the far belt carries only ~0.3 N.
   margin_left_mm: 120
   margin_right_mm: 120
   margin_bottom_mm: 10
   margin_top_mm: 250
 
 geometry:
-  anchor_left: [47, 1041]             # Motoren oben am Whiteboard-Rahmen (41 mm ueber der Tafel)
+  anchor_left: [47, 1041]             # motors on top of the whiteboard frame (41 mm above the board)
   anchor_right: [1453, 1041]
   pulley_pitch_radius_mm: 12.732      # GT2 40T: 40 * 2 mm / (2*pi)
   model: tangent                      # tangent = accurate, naive = no pre-distortion
-  # Gondel V2 (starrer Koerper an zwei Riemen, kippt in die statische Gleichgewichtslage, wbot/gondola.py):
-  attach_half_spacing_mm: 8           # Riemenangriff x = -8 (links) / +8 (rechts) zur Stiftachse
-  attach_height_mm: 176               # ... und 176 mm ueber der Stiftspitze
-  com_height_mm: 33.8                 # Schwerpunkt ueber der Stiftspitze (Fusion-Modell, nicht gewogen)
-  com_offset_x_mm: 1.2                # Schwerpunkt rechts der Stiftachse (Fusion-Modell)
-  gondola_tilt: true                  # false = Angriffspunkte starr zum Stift (keine Drehung)
-  gondola_mass_kg: 0.404              # nur fuer die Statik (workspace.py); 0.345 .. 0.465 je nach Fuellung
+  # Gondola V2 (rigid body on two belts, tilts into its static equilibrium, wbot/gondola.py):
+  attach_half_spacing_mm: 8           # belt attach point x = -8 (left) / +8 (right) from the pen axis
+  attach_height_mm: 176               # ... and 176 mm above the pen tip
+  com_height_mm: 33.8                 # centre of mass above the pen tip (Fusion model, not weighed)
+  com_offset_x_mm: 1.2                # centre of mass right of the pen axis (Fusion model)
+  gondola_tilt: true                  # false = attach points rigid to the pen (no tilt)
+  gondola_mass_kg: 0.404              # statics only (workspace.py); 0.345 .. 0.465 depending on the fill
   pen_offset_mm: [0, 0]               # kleine Kalibrierkorrektur des Angriffsvektors; [0,0] = exakt nominal
   belt_scale_left: 1.0
   belt_scale_right: 1.0
@@ -43,8 +43,8 @@ firmware:
   segment_length_mm: 1.0
   max_rate_mm_min: 3000
   boot_position: [0, 0]
-  # Hier muss der Stift beim Einschalten haengen (FluidNC-Nullpunkt). Firmware-Anker = Anker - boot_physical.
-  # [0, 0] = untere linke Ecke = aktive Board-Config. Anderer Wert -> FluidNC-Config neu erzeugen und hochladen.
+  # The pen must hang here at power-up (FluidNC origin). Firmware anchor = anchor - boot_physical.
+  # [0, 0] = lower left corner = active board config. Any other value -> regenerate and upload the FluidNC config.
   boot_physical: [0, 0]
 
 motion:
@@ -59,16 +59,16 @@ motion:
   min_chord_mm: 0.5
 
 servos:
-  pen:                                # Servo B, Z axis, gpio.4, +-44 deg (bewiesenes Fenster 1256..1744 us; mehr erst nach Freigabe)
+  pen:                                # Servo B, Z axis, gpio.4, +-44 deg (proven window 1256..1744 us; more only after sign-off)
     axis: Z
-    pin: gpio.4                       # SCL am I2C-Header (IO22/Probe verschleift das Signal)
+    pin: gpio.4                       # SCL on the I2C header (IO22/probe smears the signal)
     center_us: 1500
     us_per_deg: 5.555556                # MG90S: 1000..2000 us == 180 deg
     min_deg: -44
     max_deg: 44
     axis_min: -44
     axis_travel: 88
-    up_deg: 44                        # Gondel V2: Hub nutzt das ganze 88-Grad-Fenster
+    up_deg: 44                        # Gondola V2: the stroke uses the whole 88-degree window
     down_deg: -44
     settle_s: 0.30
     speed_deg_s: 500
@@ -78,7 +78,7 @@ servos:
     enabled: true
     center_us: 1500
     us_per_deg: 5.555556
-    min_deg: -66                      # Gondel V2: Revolver-Fenster +-66 deg (1134..1866 us)
+    min_deg: -66                      # Gondola V2: revolver window +-66 deg (1134..1866 us)
     max_deg: 66
     axis_min: 0                       # Achse 0 = -66 deg (Boot-Position liegt im Fenster)
     axis_travel: 132
@@ -87,9 +87,9 @@ servos:
     speed_deg_s: 500
 
 colors:
-  - { name: schwarz, hex: "#111111" }
-  - { name: rot, hex: "#d32f2f" }
-  - { name: blau, hex: "#1565c0" }
+  - { name: black, hex: "#111111", width_mm: 2.0 }
+  - { name: red, hex: "#d32f2f", width_mm: 2.0 }
+  - { name: blue, hex: "#1565c0", width_mm: 2.0 }
 
 connection:
   transport: sim                      # sim | serial | wifi   (serial/wifi only with explicit connect)
@@ -103,8 +103,8 @@ api:
 
 # KI-Steuerung per MCP (wbot/mcp_server.py) - wird bei jedem Tool-Aufruf neu gelesen
 mcp:
-  enabled: true                       # false: /mcp antwortet 503, der stdio-Server bietet nur emergency_stop
-  allow_motion: true                  # false = nur Vorschau/Status, nichts bewegt sich (Not-Schalter)
+  enabled: true                       # false: /mcp answers 503, the stdio server only offers emergency_stop
+  allow_motion: true                  # false = preview/status only, nothing moves (kill switch)
   max_strokes: 2000
   max_points: 200000
-  require_confirm_real_hardware: false   # true: Zeichnen auf echter Hardware nur mit confirm=true
+  require_confirm_real_hardware: false   # true: drawing on real hardware only with confirm=true

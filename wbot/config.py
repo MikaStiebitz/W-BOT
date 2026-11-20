@@ -158,6 +158,7 @@ class Servos(_Model):
 class Color(_Model):
     name: str
     hex: str = "#000000"
+    width_mm: float = Field(2.0, gt=0.0, le=20.0)    # line width the pen draws (preview, hatching)
 
 
 class Serial(_Model):
@@ -207,9 +208,9 @@ class Config(_Model):
     motion: Motion = Field(default_factory=Motion)
     servos: Servos = Field(default_factory=Servos)
     colors: list[Color] = Field(default_factory=lambda: [
-        Color(name="schwarz", hex="#111111"),
-        Color(name="rot", hex="#d32f2f"),
-        Color(name="blau", hex="#1565c0"),
+        Color(name="black", hex="#111111"),
+        Color(name="red", hex="#d32f2f"),
+        Color(name="blue", hex="#1565c0"),
     ])
     connection: Connection = Field(default_factory=Connection)
     api: Api = Field(default_factory=Api)
@@ -220,6 +221,9 @@ class Config(_Model):
     def _three_colors(cls, v: list[Color]) -> list[Color]:
         if not 1 <= len(v) <= 3:
             raise ValueError("1..3 colours")
+        legacy = {"schwarz": "black", "rot": "red", "blau": "blue", "gruen": "green", "grün": "green", "gelb": "yellow"}
+        for c in v:                                   # configs saved by older versions carry German names
+            c.name = legacy.get(c.name.strip().lower(), c.name)
         return v
 
     @model_validator(mode="after")

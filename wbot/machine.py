@@ -30,7 +30,7 @@ REFERENCE_FILE = STATE_DIR / "reference.json"
 FAKE_REFERENCE_FILE = STATE_DIR / "reference-fakeboard.json"   # loopback boards (sim-server) never touch the real one
 LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
 FW_MATCH_MM = 0.05
-WIFI_WATCHDOG_S = 8.0      # WiFi stalls longer than a cable; link loss still aborts jobs (Not-Halt)
+WIFI_WATCHDOG_S = 8.0      # WiFi stalls longer than a cable; link loss still aborts jobs (emergency stop)
 
 
 class Machine(ReferenceMixin, MotionMixin, SimMixin):
@@ -66,9 +66,9 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
         """One motion command at a time. Refuses (instead of silently queueing behind a running
         job) so that a UI click or an AI tool call gets an immediate, clear answer."""
         if self.jobs and self.jobs.running:
-            raise MachineError("Ein Job läuft - erst pausieren oder abbrechen.", "job_running")
+            raise MachineError("A job is running - pause or cancel it first.", "job_running")
         if not self._cmd_lock.acquire(blocking=False):
-            raise MachineError("Die Maschine ist gerade beschäftigt - einen Moment bitte.", "busy")
+            raise MachineError("The machine is busy - please wait a moment.", "busy")
         try:
             yield
         finally:
@@ -105,7 +105,7 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
             if self.client is not None and self.client.state.link != "open":
                 self.disconnect()                # link was lost: clean up, then reconnect
             if self.client is not None:
-                raise MachineError("Bereits verbunden - erst trennen.", "already_connected")
+                raise MachineError("Already connected - disconnect first.", "already_connected")
             transport = transport or self.cfg.connection.transport
             self.conn_status, self.conn_error = "connecting", None
         try:
@@ -117,13 +117,13 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
                 from .fluidnc.serial_link import SerialLink
                 port = port or self.cfg.connection.serial.port
                 if not port:
-                    raise MachineError("Kein COM-Port gewaehlt.", "no_port", 400)
+                    raise MachineError("No COM port selected.", "no_port", 400)
                 link = SerialLink(port, baudrate or self.cfg.connection.serial.baudrate)
                 self.port = port
             elif transport == "wifi":
                 link = self._wifi_link(host, protocol, port)
             else:
-                raise MachineError(f"Unbekannter Transport '{transport}'.", "bad_transport", 400)
+                raise MachineError(f"Unknown transport '{transport}'.", "bad_transport", 400)
             from .fluidnc.client import FluidNCClient
             wifi = transport == "wifi"
             client = FluidNCClient(link, rx_buffer_bytes=self.cfg.connection.serial.rx_buffer_bytes,
@@ -138,8 +138,8 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
         except Exception as exc:  # noqa: BLE001
             self.conn_status, self.conn_error = "error", str(exc)
             self.host = self.protocol = None
-            self.log("error", f"Verbindung fehlgeschlagen: {exc}")
-            raise MachineError(f"Verbindung fehlgeschlagen: {exc}", "connect_failed", 502) from exc
+            self.log("error", f"Connection failed: {exc}")
+            raise MachineError(f"Connection failed: {exc}", "connect_failed", 502) from exc
         with self._lock:
             self.client, self.link, self.transport = client, link, transport
             self.conn_status = "connected"
@@ -150,7 +150,7 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
             self.sim_opts = dict(sim or {})
         self._emit({"type": "trace", "data": {"clear": True}})
         label = f"{transport}/{self.protocol}" if transport == "wifi" else transport
-        self.log("info", f"Verbunden über {label} ({self.port}).")
+        self.log("info", f"Connected via {label} ({self.port}).")
         self._check_axes()
         self._try_restore_reference()
         return self.state()
@@ -162,7 +162,7 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
         w = self.cfg.connection.wifi
         host = (host or w.host or "").strip()
         if not host:
-            raise MachineError("Kein Host fuer die WLAN-Verbindung angegeben.", "no_host", 400)
+            raise MachineError("No host specified for the WiFi connection.", "no_host", 400)
         try:
             proto = normalize_protocol(protocol or w.protocol)
             if port in (None, "", 0):
@@ -171,7 +171,7 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
                 p = int(port)
             link = make_board_link(proto, host, p)
         except (LinkError, ValueError) as exc:
-            raise MachineError(f"WLAN-Verbindung nicht moeglich: {exc}", "bad_wifi", 400) from exc
+            raise MachineError(f"WiFi connection not possible: {exc}", "bad_wifi", 400) from exc
         self.host, self.protocol = host, proto
         self.port = f"{host}:{p}"
         return link
@@ -190,8 +190,8 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
         n = len(st.mpos or ())
         want = 4 if self.cfg.servos.revolver.enabled else 3
         if n and n < want:
-            self._warn(f"Firmware meldet nur {n} Achsen, erwartet {want} "
-                       "(Revolver-Servo fehlt in der FluidNC-Config?).")
+            self._warn(f"Firmware reports only {n} axes, expected {want} "
+                       "(revolver servo missing from the FluidNC config?).")
 
     def disconnect(self) -> dict:
         with self._lock:
@@ -209,7 +209,7 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
             self.host = self.protocol = None
             self.mapping, self.reference = None, None
         self._emit({"type": "trace", "data": {"clear": True}})
-        self.log("info", "Getrennt.")
+        self.log("info", "Disconnected.")
         return self.state()
 
     def shutdown(self) -> None:
@@ -231,8 +231,8 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
             self.log("info", str(ev.text))
         elif name == "LinkEvent":
             if ev.state == "lost":
-                self.conn_status, self.conn_error = "error", "Verbindung verloren"
-                self.log("error", f"Verbindung zum Controller verloren ({getattr(ev, 'reason', '')}) - Not-Halt.")
+                self.conn_status, self.conn_error = "error", "Connection lost"
+                self.log("error", f"Connection to the controller lost ({getattr(ev, 'reason', '')}) - emergency stop.")
                 if self.reference:
                     self.reference["uncertain"] = True
                 if self.jobs:
@@ -250,7 +250,7 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
     # -------------------------------------------------------------------- state
     def _require_conn(self) -> None:
         if self.client is None or self.conn_status != "connected":
-            raise MachineError("Nicht verbunden.", "not_connected")
+            raise MachineError("Not connected.", "not_connected")
 
     def fw_xy(self) -> tuple[float, float] | None:
         if self.client is None:
@@ -358,12 +358,12 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
     def _ready_for_motion(self, *, allow_busy_job: bool = False) -> None:
         self._require_conn()
         if self.jobs and self.jobs.running and not allow_busy_job:
-            raise MachineError("Ein Job läuft - erst pausieren oder abbrechen.", "job_running")
+            raise MachineError("A job is running - pause or cancel it first.", "job_running")
         ms, alarm = self.machine_state()
         if ms == "alarm":
-            raise MachineError("Controller im Alarm - erst entsperren.", "alarm")
+            raise MachineError("Controller in alarm - unlock it first.", "alarm")
         if ms == "hold":
-            raise MachineError("Maschine pausiert (Hold) - fortsetzen oder abbrechen.", "hold")
+            raise MachineError("Machine paused (Hold) - resume or cancel.", "hold")
 
     def _send_lines(self, lines: list[str], *, wait: bool = True, timeout: float = 120.0) -> None:
         """Validate, stream, wait for completion. The single gate to the hardware."""
@@ -372,13 +372,13 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
                                   allow_unreferenced_xy=False, start_outside=self.outside_safe_rect())
         if problems:
             p = problems[0]
-            self.log("error", f"G-Code abgelehnt: {p.message} ({p.line!r})")
-            raise MachineError(f"Sicherheitsprüfung: {p.message}", "unsafe", 422)
+            self.log("error", f"G-code rejected: {p.message} ({p.line!r})")
+            raise MachineError(f"Safety check: {p.message}", "unsafe", 422)
         res = self.client.stream(lines, stop_on_error=True)
         if not getattr(res, "ok", True):
-            raise MachineError(f"Controller meldet Fehler: {getattr(res, 'message', '') or getattr(res, 'status', 'unbekannt')}", "controller_error")
+            raise MachineError(f"Controller reports an error: {getattr(res, 'message', '') or getattr(res, 'status', 'unknown')}", "controller_error")
         if wait and not self.client.wait_idle(timeout=timeout):
-            raise MachineError("Zeitüberschreitung beim Warten auf das Ende der Bewegung.", "timeout", 504)
+            raise MachineError("Timed out waiting for the motion to finish.", "timeout", 504)
 
     # ------------------------------------------------------- control / e-stop
     def hold(self) -> dict:
@@ -411,14 +411,14 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
             self.jobs.on_estop()
         if self.reference:
             self.reference["uncertain"] = True
-        self._warn("NOT-HALT ausgelöst - Position nach dem Stopp prüfen, ggf. neu referenzieren.")
+        self._warn("EMERGENCY STOP triggered - check the position after the stop, re-reference if necessary.")
         return self.state()
 
     def unlock(self) -> dict:
         self._require_conn()
         if not self.client.unlock():
-            raise MachineError("Entsperren fehlgeschlagen - Controller bleibt im Alarm.", "unlock_failed")
-        self.warnings = [w for w in self.warnings if "NOT-HALT" not in w]
+            raise MachineError("Unlock failed - the controller stays in alarm.", "unlock_failed")
+        self.warnings = [w for w in self.warnings if "EMERGENCY STOP" not in w]
         return self.state()
 
     def reset(self) -> dict:
@@ -430,7 +430,7 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
         self._require_conn()
         line = line.strip()
         if not line:
-            raise MachineError("Leere Zeile.", "bad_request", 400)
+            raise MachineError("Empty line.", "bad_request", 400)
         up = line.upper()
         if line.startswith("$") and not up.startswith(("$J=", "$X", "$H")):
             return self.client.query(line)        # $I, $G, $CD ... read-only queries / settings
@@ -440,7 +440,7 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
                                       z_axis=self.axis(self.cfg.servos.pen.axis),
                                       allow_unreferenced_xy=False)
             if problems:
-                raise MachineError(f"Sicherheitsprüfung: {problems[0].message}", "unsafe", 422)
+                raise MachineError(f"Safety check: {problems[0].message}", "unsafe", 422)
             rep = self.client.send(line, timeout=30.0)
             return [getattr(rep, "text", None) or ("ok" if getattr(rep, "ok", False) else "error")]
 
@@ -450,11 +450,11 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
 
     def update_config(self, patch: dict) -> dict:
         if self.client is not None and (self.jobs and self.jobs.running):
-            raise MachineError("Während eines Jobs nicht möglich.", "job_running")
+            raise MachineError("Not possible while a job is running.", "job_running")
         try:
             new = deep_update(self.cfg, patch)
         except Exception as exc:  # noqa: BLE001
-            raise MachineError(f"Ungültige Konfiguration: {exc}", "bad_config", 422) from exc
+            raise MachineError(f"Invalid configuration: {exc}", "bad_config", 422) from exc
         self.cfg = new
         if self.mapping is not None and self.reference:        # geometry may have changed
             self.mapping = Mapping.from_config(new, tuple(self.reference["physical"]),
@@ -463,7 +463,7 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
             try:
                 save_config(new, self.config_path)
             except OSError as exc:
-                self._warn(f"Konfiguration konnte nicht gespeichert werden: {exc}")
+                self._warn(f"The configuration could not be saved: {exc}")
         return self.config_json()
 
     def firmware_config_text(self) -> str:
@@ -484,6 +484,8 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
         return self._jobs().preview(body)
 
     def start_job(self, body: dict) -> dict:
+        if self.camera is not None:
+            self.camera.check_clear(body)          # nobody standing at the board (if the camera guard is on)
         return self._jobs().start(body)
 
     def job_info(self) -> dict | None:
@@ -491,6 +493,13 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
 
     def import_svg(self, data: bytes, name: str) -> dict:
         return self._jobs().import_svg(data, name)
+
+    def import_file(self, data: bytes, name: str, options: dict | None = None) -> dict:
+        """SVG or raster image -> {drawing, info?, warnings?} (the kind is detected from the content)."""
+        head = data[:2048].lstrip().lower()
+        if head.startswith(b"<svg") or head.startswith(b"<?xml") or b"<svg" in head:
+            return self._jobs().import_svg(data, name)
+        return self._jobs().import_image(data, name, options)
 
     @property
     def dump(self) -> str:

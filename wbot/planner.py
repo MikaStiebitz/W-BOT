@@ -25,7 +25,7 @@ MAX_LINE = 60
 
 
 class PlanError(ValueError):
-    """The job cannot be planned safely (message is German)."""
+    """The job cannot be planned safely."""
 
 
 @dataclass
@@ -144,7 +144,7 @@ class _Emitter:
     # -- raw line output
     def add(self, text: str, kind: str, phys=None) -> None:
         if len(text) > MAX_LINE:
-            raise PlanError(f"G-Code-Zeile zu lang: {text}")
+            raise PlanError(f"G-code line too long: {text}")
         self.lines.append(PlanLine(text, kind, phys, self.slot, self.pen_down))
 
     def _flush_run(self) -> None:
@@ -225,7 +225,7 @@ class _Emitter:
     def select_slot(self, slot: int) -> None:
         """Rotate the revolver. Caller has lifted the pen and waited (asserted)."""
         if self.pen_down or self.pen_deg != self.cfg.servos.pen.up_deg:
-            raise PlanError("interner Fehler: Revolver-Fahrt ohne angehobenen Stift")
+            raise PlanError("internal error: revolver move without the pen raised")
         if self.o.current_slot is not None and self.slot is None and slot == self.o.current_slot:
             self.slot = slot
             self.rev_deg = self.cfg.servos.revolver.slots_deg[slot]
@@ -250,9 +250,9 @@ def plan(drawing: Drawing, cfg: Config, mapping: Mapping, opts: PlanOptions | No
     outside = count_outside(d, rect)
     if outside:
         if not o.clip:
-            raise PlanError(f"{outside} Punkte liegen außerhalb des erlaubten Bereichs {tuple(round(v, 1) for v in rect)}")
+            raise PlanError(f"{outside} points lie outside the permitted area {tuple(round(v, 1) for v in rect)}")
         d = clip_to_rect(d, rect)
-        warnings.append(f"{outside} Punkte außerhalb des erlaubten Bereichs wurden abgeschnitten")
+        warnings.append(f"{outside} points outside the permitted area were clipped")
     d = clean(d)
 
     # ---- colour -> slot
@@ -261,11 +261,11 @@ def plan(drawing: Drawing, cfg: Config, mapping: Mapping, opts: PlanOptions | No
     for s in d.strokes:
         slot = int(cmap.get(s.color, s.color))
         if not 0 <= slot < nslots:
-            raise PlanError(f"Farbe {s.color} hat keinen Revolver-Platz (Platz {slot}, vorhanden: {nslots})")
+            raise PlanError(f"Colour {s.color} has no revolver slot (slot {slot}, available: {nslots})")
         strokes.append(Stroke(s.pts, slot))
     d = Drawing(strokes, d.name)
     if not rev_on and len({s.color for s in d.strokes}) > 1:
-        warnings.append("Revolver ist deaktiviert: mehrere Farben werden mit dem aktuellen Stift gezeichnet")
+        warnings.append("The revolver is disabled: several colours will be drawn with the current pen")
 
     em = _Emitter(cfg, mapping, o)
     start = o.start_phys or tuple(float(v) for v in mapping.ref_phys)
@@ -281,7 +281,7 @@ def plan(drawing: Drawing, cfg: Config, mapping: Mapping, opts: PlanOptions | No
             em.rev.axis_value(a)
 
     if not d.strokes:
-        warnings.append("Die Zeichnung enthält keine Striche")
+        warnings.append("The drawing contains no strokes")
     em.add("G21", "setup")
     em.add("G90", "setup")
     em.lift(em.pen.travel_time_s(None, pen_spec.up_deg))      # unknown pen angle -> full range
@@ -310,7 +310,7 @@ def plan(drawing: Drawing, cfg: Config, mapping: Mapping, opts: PlanOptions | No
         qx = min(max(px, rect[0]), rect[2])
         qy = min(max(py, rect[1]), rect[3])
         if (qx, qy) != (px, py):
-            warnings.append("Parkposition liegt außerhalb des erlaubten Bereichs und wurde begrenzt")
+            warnings.append("The park position is outside the permitted area and was limited")
         em.travel_to(np.array([qx, qy]), "move")
     em._flush_run()
 

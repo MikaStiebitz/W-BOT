@@ -41,9 +41,9 @@ def _xy(v: Any, what: str) -> tuple[float, float]:
         if len(v) != 2:
             raise ValueError
     except (TypeError, ValueError, IndexError, KeyError):
-        raise MachineError(f"{what}: erwartet [x, y] in mm.", "bad_request", 400) from None
+        raise MachineError(f"{what}: expected [x, y] in mm.", "bad_request", 400) from None
     if not (math.isfinite(x) and math.isfinite(y) and abs(x) < MAX_COORD and abs(y) < MAX_COORD):
-        raise MachineError(f"{what}: ungültige Zahl.", "bad_request", 400)
+        raise MachineError(f"{what}: invalid number.", "bad_request", 400)
     return x, y
 
 
@@ -51,16 +51,16 @@ def _parse(body: dict | None) -> tuple[list[Measurement], list[str] | None]:
     body = body or {}
     raw = body.get("measurements")
     if not isinstance(raw, list) or not raw:
-        raise MachineError("Keine Messwerte übergeben ('measurements').", "bad_request", 400)
+        raise MachineError("No measurements provided ('measurements').", "bad_request", 400)
     meas = []
     for i, m in enumerate(raw, 1):
         if not isinstance(m, dict):
-            raise MachineError(f"Messpunkt {i}: Objekt mit 'target' und 'measured' erwartet.", "bad_request", 400)
-        meas.append(Measurement(_xy(m.get("target"), f"Messpunkt {i} target"),
-                                _xy(m.get("measured"), f"Messpunkt {i} measured")))
+            raise MachineError(f"Measurement point {i}: expected an object with 'target' and 'measured'.", "bad_request", 400)
+        meas.append(Measurement(_xy(m.get("target"), f"Measurement point {i} target"),
+                                _xy(m.get("measured"), f"Measurement point {i} measured")))
     free = body.get("free")
     if free is not None and (not isinstance(free, list) or not all(isinstance(f, str) for f in free)):
-        raise MachineError("'free' muss eine Liste von Parameternamen sein.", "bad_request", 400)
+        raise MachineError("'free' must be a list of parameter names.", "bad_request", 400)
     return meas, free
 
 
@@ -68,7 +68,7 @@ def _reference(machine: Machine) -> tuple[tuple[float, float], tuple[float, floa
     with machine._lock:
         ref = machine.reference
         if ref is None or machine.mapping is None:
-            raise MachineError("Erst die Gondelposition bestätigen (Referenz setzen).", "no_reference")
+            raise MachineError("Confirm the gondola position first (set the reference).", "no_reference")
         return (float(ref["physical"][0]), float(ref["physical"][1])), (float(ref["firmware"][0]), float(ref["firmware"][1]))
 
 
@@ -105,7 +105,7 @@ def calibration_apply(machine: Machine, body: dict | None) -> dict:
                 try:
                     mapping = Mapping.from_config(machine.cfg, new_ref, tuple(ref["firmware"]))
                 except KinematicsError as exc:
-                    raise MachineError(f"Referenzkorrektur nicht möglich: {exc}", "bad_reference", 422) from exc
+                    raise MachineError(f"Reference correction not possible: {exc}", "bad_reference", 422) from exc
                 ref["physical"] = [new_ref[0], new_ref[1]]
                 machine.mapping = mapping
     log.info("calibration applied: patch=%s ref_corr=%s", res.patch, res.reference_correction)

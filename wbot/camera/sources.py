@@ -20,6 +20,9 @@ import cv2
 import numpy as np
 
 log = logging.getLogger(__name__)
+# DirectShow (and some virtual-camera drivers loaded into it) crash the process when devices are
+# opened / released from several threads at once: every device open, probe and release takes this lock.
+DEVICE_LOCK = threading.RLock()
 
 
 @dataclass
@@ -49,9 +52,15 @@ class Source:
         return self
 
     def stop(self) -> None:
+        """Stop grabbing. The capture object is released by the grabber thread itself: releasing it from here
+        while the thread is still inside a (slow) DirectShow open/read crashes the process."""
         self._stop.set()
-        if self._thread and self._thread is not threading.current_thread():
-            self._thread.join(timeout=3.0)
+        t = self._thread
+        if t and t is not threading.current_thread():
+            t.join(timeout=15.0)
+            if t.is_alive():
+                log.warning("camera thread did not stop in time; it releases the device when its call returns")
+                return
         self._release()
 
     def _release(self) -> None:
@@ -119,7 +128,7 @@ class _CaptureSource(Source):
                 try:
                     self.cap = self._open()
                 except Exception as exc:  # noqa: BLE001
-                    self.cap, self.error = None, f"Kamera nicht verfügbar: {exc}"
+                    self.cap, self.error = None, f"Camera not available: {exc}"
                 if self.cap is None:
                     self._stop.wait(self.reopen_s)
                     continue
@@ -127,7 +136,7 @@ class _CaptureSource(Source):
             if not ok or img is None:
                 fails += 1
                 if fails >= 15:
-                    self.error = "Kamera liefert keine Bilder mehr (abgesteckt, OBS beendet?). Neuer Versuch ..."
+                    self.error = "The camera stopped delivering pictures (unplugged?). Retrying ..."
                     self._release()
                     fails = 0
                     self._stop.wait(self.reopen_s)
@@ -157,26 +166,38 @@ class DeviceSource(_CaptureSource):
         self.index, self.want = int(index), (int(width), int(height), int(fps))
 
     def _open(self):
-        last = "unbekannt"
+        with DEVICE_LOCK:
+            return self._open_locked()
+
+    def _release(self) -> None:
+        with DEVICE_LOCK:
+            super()._release()
+
+    def _open_locked(self):
+        last = "unknown"
         for be in _backends():
             cap = cv2.VideoCapture(self.index, be)
             if not cap.isOpened():
                 cap.release()
                 continue
-            w, h, fps = self.want
+            w, h, _fps = self.want
+            # Size FIRST, then MJPG: DirectShow picks the media type when the size changes, so MJPG set before
+            # the size is silently replaced by uncompressed YUY2 - which USB 2 carries at only ~5 fps in 1080p
+            # (measured on the test webcam: YUY2 5.3 fps, MJPG 30 fps). Never set the frame rate afterwards:
+            # that renegotiates the format and falls back to YUY2 again. Each change restarts the graph (~3 s).
+            if (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))) != (w, h):
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
             cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
-            cap.set(cv2.CAP_PROP_FPS, fps)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             ok, img = cap.read()
             if ok and img is not None:
                 log.info("camera %d opened (backend %s) %dx%d", self.index, cap.getBackendName(), img.shape[1], img.shape[0])
                 self._publish(img)
                 return cap
-            last = f"Gerät {self.index} öffnet, liefert aber kein Bild"
+            last = f"device {self.index} opens but delivers no picture"
             cap.release()
-        self.error = f"Kamera {self.index} nicht verfügbar ({last})."
+        self.error = f"Camera {self.index} not available ({last})."
         return None
 
 
@@ -191,7 +212,7 @@ class UrlSource(_CaptureSource):
         cap = cv2.VideoCapture(self.url)
         if not cap.isOpened():
             cap.release()
-            self.error = "Stream nicht erreichbar (Adresse prüfen)."
+            self.error = "Stream not reachable (check the address)."
             return None
         return cap
 
@@ -211,7 +232,7 @@ class SimSource(Source):
                 if img is not None:
                     self._publish(img)
             except Exception as exc:  # noqa: BLE001
-                self.error = f"Simulator-Kamera: {exc}"
+                self.error = f"Simulator camera: {exc}"
                 log.exception("sim camera failed")
             self._stop.wait(max(0.0, self.period - (time.time() - t0)))
 
@@ -229,25 +250,50 @@ class StillSource(Source):
             self._stop.wait(0.2)
 
 
-def probe_devices(max_index: int = 6, thumb_w: int = 240) -> list[dict]:
-    """Try indices 0..max_index-1. Returns [{index, size, thumb (JPEG bytes)}] of devices that deliver
-    a picture (the thumbnail lets the user recognise e.g. the OBS Virtual Camera)."""
+def _thumb(img: np.ndarray, thumb_w: int) -> bytes:
+    k = thumb_w / img.shape[1]
+    th = cv2.resize(img, (thumb_w, max(1, int(img.shape[0] * k))), interpolation=cv2.INTER_AREA)
+    ok, jpg = cv2.imencode(".jpg", th, [cv2.IMWRITE_JPEG_QUALITY, 70])
+    return jpg.tobytes() if ok else b""
+
+
+def looks_blank(img: np.ndarray) -> bool:
+    """All black or one flat colour: a virtual camera without a source (e.g. NVIDIA Broadcast)."""
+    return float(img.mean()) < 8.0 or float(img.std()) < 3.0
+
+
+def probe_devices(max_index: int = 6, thumb_w: int = 240, in_use: dict[int, np.ndarray] | None = None) -> list[dict]:
+    """Try indices 0..max_index-1. Returns [{index, size, backend, blank, thumb (JPEG bytes)}] of devices that
+    deliver a picture. ``in_use``: index -> latest frame of a device that is already open (not reopened)."""
     out = []
     for i in range(max_index):
-        for be in _backends():
-            cap = cv2.VideoCapture(i, be)
-            try:
-                if not cap.isOpened():
-                    continue
-                ok, img = cap.read()
-                if not ok or img is None:
-                    continue
-                k = thumb_w / img.shape[1]
-                th = cv2.resize(img, (thumb_w, max(1, int(img.shape[0] * k))), interpolation=cv2.INTER_AREA)
-                ok2, jpg = cv2.imencode(".jpg", th, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                out.append({"index": i, "size": [int(img.shape[1]), int(img.shape[0])],
-                            "backend": cap.getBackendName(), "thumb": jpg.tobytes() if ok2 else b""})
-                break
-            finally:
-                cap.release()
+        if in_use and i in in_use:
+            img = in_use[i]
+            out.append({"index": i, "size": [int(img.shape[1]), int(img.shape[0])], "backend": "in use",
+                        "blank": looks_blank(img), "thumb": _thumb(img, thumb_w)})
+            continue
+        with DEVICE_LOCK:
+            out += _probe_one(i, thumb_w)
+    return out
+
+
+def _probe_one(i: int, thumb_w: int) -> list[dict]:
+    out = []
+    for be in _backends():
+        cap = cv2.VideoCapture(i, be)
+        try:
+            if not cap.isOpened():
+                continue
+            ok, img = cap.read()
+            if not ok or img is None:
+                continue
+            for _ in range(3):                      # first frames of some webcams are black
+                ok3, nxt = cap.read()
+                if ok3 and nxt is not None:
+                    img = nxt
+            out.append({"index": i, "size": [int(img.shape[1]), int(img.shape[0])], "backend": cap.getBackendName(),
+                        "blank": looks_blank(img), "thumb": _thumb(img, thumb_w)})
+            break
+        finally:
+            cap.release()
     return out

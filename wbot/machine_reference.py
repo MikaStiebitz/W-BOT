@@ -24,33 +24,37 @@ class ReferenceMixin:
     def set_reference(self, x: float, y: float) -> dict:
         self._require_conn()
         if self.jobs and self.jobs.running:
-            raise MachineError("Während eines Jobs nicht möglich.", "job_running")
+            raise MachineError("Not possible while a job is running.", "job_running")
         ms, _ = self.machine_state()
         if ms in ("run", "jog"):
-            raise MachineError("Maschine bewegt sich - erst stoppen.", "moving")
+            raise MachineError("The machine is moving - stop it first.", "moving")
         fw = self.fw_xy()
         if fw is None:
-            raise MachineError("Keine Positionsmeldung vom Controller.", "no_status")
+            raise MachineError("No position report from the controller.", "no_status")
         b = self.cfg.board
         if not (-50 <= x <= b.width_mm + 50 and -50 <= y <= b.height_mm + 50):
-            raise MachineError("Referenzposition liegt weit außerhalb des Boards.", "bad_reference", 400)
+            raise MachineError("The reference position is far outside the board.", "bad_reference", 400)
         try:
             self.mapping = Mapping.from_config(self.cfg, (x, y), fw)
         except KinematicsError as exc:
-            raise MachineError(f"Referenz nicht möglich: {exc}", "bad_reference", 400) from exc
+            raise MachineError(f"Reference not possible: {exc}", "bad_reference", 400) from exc
         bad = self.mapping.unreachable_points(self.cfg.safe_rect())
         if bad:
             self.mapping = None
-            raise MachineError(
-                f"Die Firmware glaubt, die Gondel stehe bei ({fw[0]:.0f}, {fw[1]:.0f}) mm, du gibst aber "
-                f"({x:.0f}, {y:.0f}) mm an. So lassen sich {len(bad)} Punkte des Boards nicht anfahren. "
-                f"Hänge die Gondel vor dem Einschalten dorthin, wo die Firmware sie vermutet "
-                f"(Boot-Position der Config: {self.cfg.firmware.boot_physical[0]:.0f}, "
-                f"{self.cfg.firmware.boot_physical[1]:.0f} mm), und starte das Board neu.",
-                "reference_unreachable", 422)
+            boot = self.cfg.firmware.boot_physical
+            if abs(x - (fw[0] + boot[0])) < 1.0 and abs(y - (fw[1] + boot[1])) < 1.0:
+                # the position agrees with what the firmware reports: the geometry or the drawing area is the problem
+                msg = (f"With the configured motor positions, {len(bad)} points of the drawing area cannot be reached "
+                       f"from ({x:.0f}, {y:.0f}) mm. Check the motor positions (Setup) or shrink the drawing area (More, Settings).")
+            else:
+                msg = (f"The firmware believes the gondola is at ({fw[0]:.0f}, {fw[1]:.0f}) mm, but you specified "
+                       f"({x:.0f}, {y:.0f}) mm. {len(bad)} points of the board cannot be reached that way. "
+                       f"Before powering on, hang the gondola where the firmware expects it "
+                       f"(boot position in the config: {boot[0]:.0f}, {boot[1]:.0f} mm), and restart the board.")
+            raise MachineError(msg, "reference_unreachable", 422)
         self.reference = {"physical": [x, y], "firmware": list(fw), "restored": False, "uncertain": False}
         self._save_reference()
-        self.log("info", f"Referenz gesetzt: Stift bei ({x:.1f}, {y:.1f}) mm, Firmware ({fw[0]:.3f}, {fw[1]:.3f}).")
+        self.log("info", f"Reference set: pen at ({x:.1f}, {y:.1f}) mm, firmware ({fw[0]:.3f}, {fw[1]:.3f}).")
         return self.state()
 
     def _reference_file(self) -> Path:
@@ -80,12 +84,12 @@ class ReferenceMixin:
             if fw and np.hypot(fw[0] - saved["firmware"][0], fw[1] - saved["firmware"][1]) <= _m().FW_MATCH_MM:
                 self.set_reference(*saved["physical"])
                 self.reference["restored"] = True
-                self._warn("Referenz aus der letzten Sitzung wiederhergestellt - bitte prüfen, ob die "
-                           "Gondel wirklich dort hängt (nach Reset/Stromausfall ggf. neu referenzieren).")
+                self._warn("Reference restored from the last session - please check that the "
+                           "gondola really hangs there (re-reference after a reset/power loss if necessary).")
         except Exception:  # noqa: BLE001
             log.exception("could not restore reference")
 
     def _need_reference(self) -> Mapping:
         if self.mapping is None:
-            raise MachineError("Erst die Gondelposition bestätigen (Referenz setzen).", "no_reference")
+            raise MachineError("Confirm the gondola position first (set the reference).", "no_reference")
         return self.mapping

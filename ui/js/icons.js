@@ -1,4 +1,4 @@
-// Minimale Strich-Icons (24x24, currentColor). Keine Emojis.
+// Minimal stroke icons (24x24, currentColor). No emoji.
 const NS = 'http://www.w3.org/2000/svg';
 const P = {
   up: 'M12 19V5M5 12l7-7 7 7',
@@ -30,6 +30,7 @@ const P = {
   save: 'M5 4h12l3 3v13H5zM8 4v5h8V4M8 20v-6h8v6',
   logo: 'M3 5l9 12 9-12M12 17v0',
   camera: 'M4 8h3l2-3h6l2 3h3v11H4zM12 10a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z',
+  gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
   print: 'M7 9V3h10v6M7 17H4v-8h16v8h-3M7 14h10v7H7z',
 };
 
@@ -49,7 +50,7 @@ export function icon(name, cls = 'icon') {
   return svg;
 }
 
-/** Logo: V-förmige Riemen und Gondel. */
+/** Logo: V-shaped belts and gondola. */
 export function logo() {
   const svg = document.createElementNS(NS, 'svg');
   svg.setAttribute('viewBox', '0 0 32 32');

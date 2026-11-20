@@ -1,5 +1,5 @@
-// Zeichnungs-JSON (Vertrag): {name, strokes:[{color:int(0-basiert), points:[[x,y],...]}]} in Board-mm.
-// Tolerant gegenüber `pts` statt `points`.
+// Drawing JSON (contract): {name, strokes:[{color:int(0-based), points:[[x,y],...]}]} in board mm.
+// Tolerates `pts` instead of `points`.
 
 export function strokesOf(drawing) {
   const out = [];

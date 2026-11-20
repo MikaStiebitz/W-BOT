@@ -126,7 +126,7 @@ async def test_status_board_info_and_patterns(plotter):
         s = text(await c.call_tool("get_status", {}))
         assert "connection: connected (sim" in s and "reference: set" in s and "ready_to_draw: yes" in s
         b = text(await c.call_tool("get_board_info", {}))
-        assert "x 120..1380, y 10..750" in b and "1=schwarz" in b and "3=blau" in b and "lower-left" in b
+        assert "x 120..1380, y 10..750" in b and "1=black" in b and "3=blue" in b and "lower-left" in b
         p = text(await c.call_tool("list_patterns", {}))
         assert "square-frame" in p and "colour slot 1..3" in p
 
@@ -134,7 +134,7 @@ async def test_status_board_info_and_patterns(plotter):
 async def test_preview_returns_valid_png_and_moves_nothing(plotter):
     m, app = plotter
     async with mcp_client(app) as c:
-        strokes = [{"color": 1, "points": SQUARE}, {"color": "blau", "points": [[600, 300], [900, 500]]}]
+        strokes = [{"color": 1, "points": SQUARE}, {"color": "blue", "points": [[600, 300], [900, 500]]}]
         res = await c.call_tool("preview_drawing", {"strokes": strokes})
         assert not res.is_error
         assert "PREVIEW ONLY" in text(res) and "estimated" in text(res)
@@ -151,12 +151,12 @@ async def test_preview_returns_valid_png_and_moves_nothing(plotter):
 async def test_preview_via_pattern_and_validation(plotter):
     _, app = plotter
     async with mcp_client(app) as c:
-        ok = await c.call_tool("preview_drawing", {"pattern": "star", "params": {"color": "rot"}})
-        assert not ok.is_error and "2 (rot)" in text(ok) and images(ok)
+        ok = await c.call_tool("preview_drawing", {"pattern": "star", "params": {"color": "red"}})
+        assert not ok.is_error and "2 (red)" in text(ok) and images(ok)
         for args in ({}, {"strokes": [{"points": SQUARE}], "pattern": "star"}):
             assert (await c.call_tool("preview_drawing", args)).is_error
         bad = await c.call_tool("preview_drawing", {"pattern": "gibt-es-nicht"})
-        assert bad.is_error and "Unbekanntes Testbild" in text(bad)
+        assert bad.is_error and "Unknown test pattern" in text(bad)
         bad = await c.call_tool("preview_drawing", {"strokes": [{"color": 4, "points": SQUARE}]})
         assert bad.is_error and "1..3" in text(bad)
         bad = await c.call_tool("preview_drawing", {"strokes": [{"points": [[1, 1]]}]})
@@ -179,8 +179,8 @@ async def test_draw_shape_and_shapes_and_strokes_end_to_end(plotter):
     _, app = plotter
     async with mcp_client(app) as c:
         r = await c.call_tool("draw_shape", {"kind": "circle", "x": 700, "y": 400, "radius": 25,
-                                             "fill": True, "hatch_spacing_mm": 6, "color": "rot"})
-        assert not r.is_error and "2 (rot)" in text(r)
+                                             "fill": True, "hatch_spacing_mm": 6, "color": "red"})
+        assert not r.is_error and "2 (red)" in text(r)
         assert " done," in await wait_job(c)
         assert await job_error_mm(c) < 0.1
         r = await c.call_tool("draw_shapes", {"shapes": [
@@ -203,7 +203,7 @@ async def test_draw_pattern_and_svg_dry_run(plotter):
         svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="60mm" height="40mm" viewBox="0 0 60 40">'
                '<rect x="2" y="2" width="56" height="36" fill="none" stroke="#000"/><text x="5" y="20">x</text></svg>')
         r = await c.call_tool("draw_svg", {"svg_text": svg, "fit": False, "x": 500, "y": 300, "dry_run": True})
-        assert not r.is_error and "DRY RUN" in text(r) and "Text werden nicht importiert" in text(r)
+        assert not r.is_error and "DRY RUN" in text(r) and "text elements are not imported" in text(r)
         assert " done," in await wait_job(c)
         assert all(not s.pen_down for s in m._emulator().trace)  # dry run: pen stayed up
         r = await c.call_tool("draw_pattern", {"id": "corner-marks", "params": {"length_mm": 20}})
@@ -269,11 +269,11 @@ async def test_refusals_not_connected_and_no_reference():
         async with mcp_client(app) as c:
             assert "ready_to_draw: NO" in text(await c.call_tool("get_status", {}))
             r = await c.call_tool("draw_text", {"text": "A", "x": 700, "y": 400})
-            assert r.is_error and "Nicht verbunden" in text(r) and "human" in text(r)
+            assert r.is_error and "Not connected" in text(r) and "human" in text(r)
             assert not (await c.call_tool("draw_text", {"text": "A", "x": 700, "y": 400, "preview_only": True})).is_error
             m.connect("sim", None, None, {"speed": 60})
             r = await c.call_tool("draw_text", {"text": "A", "x": 700, "y": 400})
-            assert r.is_error and "Gondelposition" in text(r)
+            assert r.is_error and "gondola position" in text(r)
             assert (await c.call_tool("move_to", {"x": 500, "y": 400})).is_error
     finally:
         m.shutdown()
@@ -317,12 +317,12 @@ async def test_simple_moves_and_color(plotter):
     async with mcp_client(app) as c:
         assert "moved to x=500.0 y=400.0" in text(await c.call_tool("move_to", {"x": 500, "y": 400}))
         r = await c.call_tool("move_to", {"x": 5000, "y": 400})
-        assert r.is_error and "außerhalb" in text(r)
-        assert "colour 2 (rot)" in text(await c.call_tool("select_color", {"color": "rot"}))
+        assert r.is_error and "outside the permitted area" in text(r)
+        assert "colour 2 (red)" in text(await c.call_tool("select_color", {"color": "red"}))
         assert "colour 3" in text(await c.call_tool("select_color", {"color": 3}))
         assert (await c.call_tool("select_color", {"color": 9})).is_error
         assert "pen up" in text(await c.call_tool("pen_up", {}))
-        assert "colour: 3 (blau)" in text(await c.call_tool("get_status", {}))
+        assert "colour: 3 (blue)" in text(await c.call_tool("get_status", {}))
 
 
 async def test_confirm_required_for_real_hardware(plotter):
@@ -446,6 +446,6 @@ async def test_stdio_server_proxies_and_reports_missing_webserver(plotter):
     params = StdioServerParameters(command=sys.executable, args=["-m", "wbot", "mcp", "--api", dead], cwd=str(ROOT))
     async with Client(stdio_client(params)) as c:
         r = await c.call_tool("get_status", {})
-        assert r.is_error and "nicht erreichbar" in text(r) and "python -m wbot serve" in text(r)
+        assert r.is_error and "not reachable" in text(r) and "python -m wbot serve" in text(r)
         r = await c.call_tool("emergency_stop", {})
-        assert r.is_error and "nicht erreichbar" in text(r)
+        assert r.is_error and "not reachable" in text(r)

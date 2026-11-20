@@ -19,7 +19,7 @@ HIGH-LEVEL. NOT exposed, because each of them needs a human at the board:
 * direct servo angles (mechanical end stops).
 
 ``mcp.allow_motion: false`` in config/wbot.yaml is a kill switch (status, preview and stop only).
-Tool errors carry the German message of the API; tools use 1-based colour slots only.
+Tool errors carry the message of the API; tools use 1-based colour slots only.
 """
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ and emergency_stop exist; after an emergency stop a human must unlock and re-ref
 TIPS: one draw call = one job, so put a whole composition into one call (draw_strokes, draw_shapes). Close a \
 polygon by repeating its first point. Single-stroke font: text height is the cap height; below ~15 mm text gets \
 hard to read with a marker. Filled areas are hatched with parallel lines (hatch_spacing_mm >= 1; 3-5 mm looks \
-solid enough with a marker). Errors are German messages from the machine; relay anything that needs a human.
+solid enough with a marker). Errors are messages from the machine; relay anything that needs a human.
 """
 
 Color = int | str
@@ -152,10 +152,10 @@ find free space or compare plan and reality. Never moves anything."""
         await ctx()
         info = await api.get("/api/camera")
         if not info.get("source"):
-            raise McpToolError("No camera is selected. A human chooses one in the web UI (tab Kamera).", "no_camera")
+            raise McpToolError("No camera is selected. A human chooses one in the web UI (Camera tab).", "no_camera")
         v = "board" if view == "board" else "raw"
         if v == "board" and not info.get("calibrated"):
-            raise McpToolError("The camera is not calibrated to the board yet (web UI, tab Kamera, step 3). "
+            raise McpToolError("The camera is not calibrated to the board yet (web UI, Camera tab, step 3). "
                                "view='camera' gives the raw picture.", "camera_uncalibrated")
         w = max(320, min(int(width), 1920))
         jpg = await api.request("GET", f"/api/camera/frame.jpg?view={v}&w={w}&q=80&overlay={int(bool(overlay))}")
@@ -224,7 +224,7 @@ runs with the pen up."""
                         align: Literal["left", "center", "right"] = "center",
                         valign: Literal["baseline", "center", "top"] = "center", line_spacing: float = 1.0,
                         dry_run: bool = False, preview_only: bool = False, confirm: bool = False) -> Any:
-        """Write text with a single-stroke (Hershey) font, e.g. to write HALLO in the middle of the board. (x, y) \
+        """Write text with a single-stroke (Hershey) font, e.g. to write HELLO in the middle of the board. (x, y) \
 is the anchor in board mm: `align` = horizontal reference (left/center/right edge of every line), `valign` = vertical \
 reference of the whole block (center = middle of the capitals, baseline, top). height_mm = capital height. Use \\n \
 for several lines. Umlauts work. Returns a PNG preview; text sticking out of the usable area is clipped (warning)."""
@@ -285,7 +285,7 @@ no text/images/fills; the nearest pen colour is chosen per stroke colour). fit=t
         try:
             imp = import_svg(svg_text, c.cfg, SvgOptions(max_points=c.mcp.max_points, max_bytes=2_000_000), name)
         except SvgError as exc:
-            raise McpToolError(f"SVG konnte nicht gelesen werden: {exc}") from None
+            raise McpToolError(f"The SVG could not be read: {exc}") from None
         d, rect = imp.drawing, c.cfg.safe_rect()
         if not d.strokes:
             raise McpToolError("The SVG contains nothing drawable. " + " ".join(imp.warnings))

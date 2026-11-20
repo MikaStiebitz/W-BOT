@@ -1,4 +1,4 @@
-// Winziger reaktiver Store: set({key: wert}) benachrichtigt Abonnenten der geänderten Schlüssel.
+// Tiny reactive store: set({key: value}) notifies subscribers of the changed keys.
 import { lsGet, lsSet } from './util.js';
 
 export function createStore(initial) {
@@ -14,14 +14,14 @@ export function createStore(initial) {
     const fns = new Set();
     for (const k of keys) for (const f of subs.get(k) ?? []) fns.add(f);
     for (const f of fns) {
-      try { f(data, keys); } catch (e) { console.error('Store-Abonnent fehlgeschlagen', e); }
+      try { f(data, keys); } catch (e) { console.error('Store subscriber failed', e); }
     }
   }
 
   return {
     get: (k) => data[k],
     all: () => data,
-    /** Setzt Werte; Abonnenten laufen gebündelt im nächsten Microtask. */
+    /** Sets values; subscribers run batched in the next microtask. */
     set(patch) {
       for (const [k, v] of Object.entries(patch)) {
         if (data[k] === v && (v === null || typeof v !== 'object')) continue;
@@ -30,7 +30,7 @@ export function createStore(initial) {
       }
       if (queued.size && !scheduled) { scheduled = true; queueMicrotask(flush); }
     },
-    /** Wie set(), erzwingt Benachrichtigung auch bei gleicher Referenz (mutierte Arrays). */
+    /** Like set(), but forces a notification even for the same reference (mutated arrays). */
     touch(...keys) {
       for (const k of keys) queued.add(k);
       if (queued.size && !scheduled) { scheduled = true; queueMicrotask(flush); }
@@ -45,31 +45,41 @@ export function createStore(initial) {
 }
 
 export const store = createStore({
-  state: null,          // letzter State vom Server
-  config: null,         // Config als JSON
+  state: null,          // last state from the server
+  config: null,         // config as JSON
   patterns: [],         // /api/patterns
   ports: [],            // /api/ports
-  job: null,            // letzter Job
+  job: null,            // last job
   ws: 'connecting',     // connecting | open | closed
   simInfo: null,        // /api/simulator
-  preview: null,        // letzte Vorschau {drawing, bounds, ...}
-  trace: [],            // [[x0,y0,x1,y1,down,color], ...]   (mutiert, dann touch('trace'))
-  logs: [],             // {n,level,text,t}                  (mutiert, dann touch('logs'))
+  preview: null,        // last preview {drawing, bounds, ...}
+  trace: [],            // [[x0,y0,x1,y1,down,color], ...]   (mutated, then touch('trace'))
+  logs: [],             // {n,level,text,t}                  (mutated, then touch('logs'))
   logSeq: 0,
-  calib: null,          // Kalibrier-Overlay {targets, measured, hot, result, rowIdx}
-  camera: null,         // GET /api/camera (Quelle, Geometrie, Abdeckung)
-  camTrack: null,       // WS "camera": Gondel-Marker {t, seen, soll, pen, dev_mm}
+  calib: null,          // calibration overlay {targets, measured, hot, result, rowIdx}
+  camera: null,         // GET /api/camera (source, geometry, coverage)
+  camTrack: null,       // WS "camera": gondola marker {t, seen, soll, pen, dev_mm}
+  presence: null,       // WS "presence": person at the board {present, outline, skeleton, ...}
+  anchorPreview: null,  // measured motors not yet applied {left, right, rect} (green in the live view)
   autocal: null,        // WS "autocal" / GET /api/camera/autocal
-  camFrame: 0,          // Zähler: neues Kamerabild für die Brettansicht
-  target: null,         // angeklickter Brettpunkt {x,y,sx,sy}
-  tab: lsGet('wbot-tab', 'fahren'),
+  camFrame: 0,          // counter: new camera frame for the board view
+  target: null,         // clicked board point {x,y,sx,sy}
+  tab: lsGet('wbot-tab', 'draw'),
+  moreOpen: lsGet('wbot-more', null),   // open section of the "more" tab
+  selectedPen: lsGet('wbot-pen', 0),   // pen used for single-pen images and shown in the revolver view
   step: lsGet('wbot-step', 10),
-  feed: lsGet('wbot-feed', null),   // Jog-/Fahrgeschwindigkeit mm/min (null = Config)
+  feed: lsGet('wbot-feed', null),   // jog / travel speed mm/min (null = config)
   simOpts: lsGet('wbot-simopts', { speed: 1, start: [0, 0], perturb: {} }),
   transport: lsGet('wbot-transport', null),
   port: lsGet('wbot-port', null),
-  wifi: lsGet('wbot-wifi', { host: 'fluidnc.local', protocol: 'telnet' }),   // nur Host + Protokoll, es gibt kein Passwort
+  wifi: lsGet('wbot-wifi', { host: 'fluidnc.local', protocol: 'telnet' }),   // host + protocol only, there is no password
 });
+
+/** True when panel `id` is on screen: its own tab, or its section is open inside the "more" tab. */
+export function viewing(id) {
+  const tab = store.get('tab');
+  return tab === id || (tab === 'more' && store.get('moreOpen') === id);
+}
 
 export function persist(key, storeKey) {
   store.on(storeKey, (d) => lsSet(key, d[storeKey]));

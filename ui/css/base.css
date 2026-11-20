@@ -1,5 +1,5 @@
-/* W-BOT Steuerung - Design-Tokens, Reset, Typografie.
-   Zwei Themes: hell (Standard), dunkel (prefers-color-scheme oder [data-theme=dark]). */
+/* W-BOT - design tokens, reset, typography.
+   Two themes: light (default) and dark (prefers-color-scheme or [data-theme=dark]). */
 
 :root {
   --font-ui: "Bahnschrift", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
@@ -10,7 +10,7 @@
   --tap: 44px;
   --fs-s: 12.5px; --fs-m: 15px; --fs-l: 17px;
 
-  /* Not-Halt bleibt in beiden Themes gleich (wie am echten Schaltschrank) */
+  /* The emergency stop looks the same in both themes (like on a real control cabinet) */
   --estop: #d7261e; --estop-dark: #a31811; --estop-ring: #f2c200;
 
   --bg: #dde3e8;

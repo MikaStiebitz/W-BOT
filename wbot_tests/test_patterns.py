@@ -61,12 +61,12 @@ def test_pattern_to_dict_shape():
     assert ch["choices"][0].keys() == {"value", "label"}
 
 
-def test_param_validation_german_errors():
-    with pytest.raises(ValueError, match="zwischen"):
+def test_param_validation_errors():
+    with pytest.raises(ValueError, match="must be between"):
         build_pattern(CFG, "circles", {"count": 99})
-    with pytest.raises(ValueError, match="Unbekannter Parameter"):
+    with pytest.raises(ValueError, match="Unknown parameter"):
         build_pattern(CFG, "circles", {"nope": 1})
-    with pytest.raises(ValueError, match="Unbekanntes Testbild"):
+    with pytest.raises(ValueError, match="Unknown test pattern"):
         build_pattern(CFG, "nope")
     with pytest.raises(ValueError):
         build_pattern(CFG, "circles", {"count": "abc"})

@@ -1,45 +1,22 @@
-/* API-Schicht der UI. Alle HTTP-Aufrufe und der WebSocket laufen hier durch.
+/* API layer of the UI: every HTTP call and the WebSocket go through here (contract: docs/ARCHITECTURE.md).
 
-   Vollständige Liste der Aufrufe, die die UI macht (Vertrag: docs/ARCHITECTURE.md):
-     GET  /api/state                      -> State                        (Start, nach WS-Reconnect)
-     GET  /api/ports                      -> [{device, description}]      (Port-Auswahl)
-     POST /api/connect {transport, port?, baudrate?, sim?:{speed, physical_start, perturb}} -> State
-                                          (transport 'wifi': {host, protocol:'telnet'|'websocket', port?} statt port/baudrate)
-     POST /api/disconnect                 -> State
-     POST /api/reference {x, y}           -> State   (422 reference_unreachable: deutscher Text wird angezeigt)
-     POST /api/jog {dx, dy, feed?}        -> {ok}
-     POST /api/goto {x, y, feed?, pen:"up"} -> {ok}
-     POST /api/park                       -> {ok}
-     POST /api/pen {state:"up"|"down"} | {angle}            -> State
-     POST /api/revolver {slot:1..3} | {angle}               -> State   (hebt Stift automatisch)
-     POST /api/hold | /api/resume | /api/cancel | /api/estop | /api/unlock | /api/reset -> State
-     POST /api/gcode {line}               -> {replies:[...]}              (Konsole)
-     GET  /api/patterns                   -> [{id,name,description,params:[Param]}]
-     POST /api/preview {pattern:{id,params}} | {drawing}, layout:{scale,rotate,dx,dy,fit}
-                                          -> {drawing, bounds, estimated_s, warnings, stats}
-     POST /api/jobs {pattern|drawing, layout, dry_run, speed_scale} -> Job
-     GET  /api/job                        -> Job | null
-     POST /api/svg (multipart "file")     -> {drawing}
-     GET  /api/config                     -> Config
-     PUT  /api/config {Teil-Patch}        -> Config
-     GET  /api/firmware-config            -> text/plain (YAML)
-     GET  /api/simulator                  -> {physical, intended, firmware, error_mm, job_error:{max_mm,mean_mm,p95_mm,samples}?, perturb, trace} | null
-     GET  /api/calibration/targets?n_x&n_y&inset_mm -> {targets:[[x,y]], pattern?:{id,params}}   (Reiter Kalibrieren)
-     POST /api/calibration/fit {measurements:[{target,measured}], free:null} -> CalibResult
-     POST /api/calibration/apply (gleicher Body)       -> {applied, result, config}
-     Kamera und Maßband-Kalibrierung: siehe Liste in wbot/camera_api.py (GET/PUT /api/camera, /api/camera/frame.jpg, ...)
-     WS   /ws  <- {type:"state"|"log"|"job"|"trace"|"camera"|"autocal", data|...}   (Client sendet nichts)
+     GET  /api/state, /api/ports, /api/config, /api/patterns, /api/job, /api/simulator
+     POST /api/connect | /disconnect | /reference | /jog | /goto | /park | /pen | /revolver
+     POST /api/hold | /resume | /cancel | /estop | /unlock | /reset | /gcode
+     POST /api/preview {pattern|drawing, layout} -> {drawing, bounds, estimated_s, warnings, stats}
+     POST /api/jobs {pattern|drawing, layout, dry_run, speed_scale}
+     POST /api/import (multipart file + options JSON) -> {drawing, info?, warnings?}   (SVG, PNG, JPEG, ...)
+     PUT  /api/config {partial patch}
+     Camera and tape calibration: see the list in wbot/camera_api.py.
+     WS   /ws  <- {type:"state"|"log"|"job"|"trace"|"camera"|"autocal"|"presence", data}   (the client sends nothing)
 
-   NICHT benutzt: POST /api/servo (die UI nutzt /api/pen {angle} und /api/revolver {angle};
-   /api/servo hebt laut Backend ebenfalls den Stift vor dem Revolver, ist aber doppelt gemoppelt).
-
-   Fehler: HTTP 4xx/5xx mit {error, code} -> Toast mit dem deutschen `error`-Text, danach ApiError.
+   Errors: HTTP 4xx/5xx with {error, code} -> one dismissible notice with the English `error` text, then ApiError.
 */
 import { ApiError } from './util.js';
 import { store } from './store.js';
-import { toast } from './ui.js';
+import { toast, notice, clearNotice, confirmDialog } from './ui.js';
 
-const NET_MSG = 'Keine Verbindung zum Server. Läuft die W-BOT-Software noch?';
+const NET_MSG = 'Cannot reach the W-BOT server. Is `wbot serve` still running?';
 
 async function parse(res) {
   const ct = res.headers.get('content-type') || '';
@@ -52,12 +29,12 @@ function errorText(data, status) {
     if (typeof data.error === 'string') return [data.error, data.code || 'error'];
     if (Array.isArray(data.detail)) {                       // FastAPI-Validierung (422)
       const d = data.detail.map((x) => `${(x.loc || []).slice(1).join('.')}: ${x.msg}`).join('; ');
-      return [`Ungültige Eingabe (${d}).`, 'validation'];
+      return [`Invalid input (${d}).`, 'validation'];
     }
     if (typeof data.detail === 'string') return [data.detail, 'error'];
   }
-  if (status === 404) return ['Nicht gefunden (Server kennt diese Funktion nicht).', 'not_found'];
-  return [`Serverfehler ${status}.`, 'http_' + status];
+  if (status === 404) return ['Not found (the server does not know this function).', 'not_found'];
+  return [`Server error ${status}.`, 'http_' + status];
 }
 
 async function request(method, path, body, { quiet = false, form = null } = {}) {
@@ -69,9 +46,11 @@ async function request(method, path, body, { quiet = false, form = null } = {}) 
       body: form ?? (body !== undefined ? JSON.stringify(body) : undefined),
     });
   } catch {
-    if (!quiet) toast(NET_MSG, 'error');
+    // the header already shows a banner while the live connection is down: no second message then
+    if (!quiet && store.get('ws') === 'open') notice('network', NET_MSG, 'error', { ms: 0 });      // one sticky notice, not one per failed call
     throw new ApiError(NET_MSG, 'network', 0);
   }
+  clearNotice('network');
   const data = await parse(res);
   if (!res.ok) {
     const [msg, code] = errorText(data, res.status);
@@ -107,8 +86,20 @@ export const api = {
   gcode: (line) => post('/gcode', { line }),
   patterns: (o) => get('/patterns', o),
   preview: (body, o) => request('POST', '/preview', body, o),
-  startJob: (body) => post('/jobs', body),
+  startJob: async (body) => {
+    try { return await post('/jobs', body, { quiet: true }); }
+    catch (e) {
+      if (e.code === 'person_present') {          // camera guard: someone stands at the board
+        const ok = await confirmDialog({ title: 'The board is blocked', text: 'The job does not start while something is in front of the board. Start it automatically once the board has been free for 3 seconds?', ok: 'Start when free' });
+        if (ok) { await request('POST', '/camera/queue-job', body); toast('The job waits until the board is free.', 'ok'); return store.get('job'); }
+      } else toast(e.message, 'error');
+      throw e;
+    }
+  },
+  /** Like startJob, but without dialogs or notices: the caller decides what an error means (live draw). */
+  startJobQuiet: (body) => post('/jobs', body, { quiet: true }),
   job: (o) => get('/job', o),
+  importFile: (file, options = {}) => { const f = new FormData(); f.append('file', file); f.append('options', JSON.stringify(options)); return request('POST', '/import', undefined, { form: f }); },
   svg: (file) => { const f = new FormData(); f.append('file', file); return request('POST', '/svg', undefined, { form: f }); },
   config: (o) => get('/config', o),
   putConfig: (patch) => request('PUT', '/config', patch),
@@ -117,7 +108,7 @@ export const api = {
   calTargets: (nx, ny, inset, o) => get(`/calibration/targets?n_x=${nx}&n_y=${ny}&inset_mm=${inset}`, o),
   calFit: (body) => request('POST', '/calibration/fit', body),
   calApply: (body) => request('POST', '/calibration/apply', body),
-  // Kamera (wbot/camera_api.py)
+  // Camera (wbot/camera_api.py)
   camera: (o) => get('/camera', o),
   cameraPut: (patch) => request('PUT', '/camera', patch),
   cameraDevices: () => get('/camera/devices'),
@@ -125,6 +116,10 @@ export const api = {
   cameraCalibrate: (body) => request('POST', '/camera/calibrate', body),
   cameraMarkers: () => request('POST', '/camera/calibrate/markers'),
   cameraUncalibrate: () => request('DELETE', '/camera/calibrate'),
+  gondolaLocate: (apply = false, o) => request('POST', '/camera/gondola/locate', { apply }, o).then(applyState),
+  autoSetup: () => request('POST', '/camera/auto-setup'),
+  cameraMotors: () => get('/camera/motors/suggest'),
+  cameraAnchors: (body) => request('POST', '/camera/anchors', body),
   lensCapture: (cols, rows) => request('POST', '/camera/lens/capture', { cols, rows }),
   lensCompute: (square_mm) => request('POST', '/camera/lens/compute', { square_mm }),
   lensClear: () => request('DELETE', '/camera/lens'),
@@ -139,7 +134,7 @@ export const api = {
   tapeApply: (body) => request('POST', '/calibration/tape/apply', body),
 };
 
-/* ---------- WebSocket mit Backoff ---------- */
+/* ---------- WebSocket with backoff ---------- */
 export function startWs({ onMessage, onOpen }) {
   let ws = null, tries = 0, timer = null, stopped = false;
 
@@ -152,10 +147,10 @@ export function startWs({ onMessage, onOpen }) {
     ws.onmessage = (ev) => {
       let msg;
       try { msg = JSON.parse(ev.data); } catch { return; }
-      try { onMessage(msg); } catch (e) { console.error('WS-Nachricht fehlerhaft behandelt', e); }
+      try { onMessage(msg); } catch (e) { console.error('Failed to handle WS message', e); }
     };
     ws.onclose = () => { store.set({ ws: 'closed' }); retry(); };
-    ws.onerror = () => { try { ws.close(); } catch { /* egal */ } };
+    ws.onerror = () => { try { ws.close(); } catch { /* ignore */ } };
   }
 
   function retry() {
@@ -165,5 +160,5 @@ export function startWs({ onMessage, onOpen }) {
   }
 
   connect();
-  return { stop() { stopped = true; clearTimeout(timer); try { ws?.close(); } catch { /* egal */ } } };
+  return { stop() { stopped = true; clearTimeout(timer); try { ws?.close(); } catch { /* ignore */ } } };
 }

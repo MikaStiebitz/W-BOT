@@ -48,6 +48,7 @@ class SimCamera:
         self.true_H /= self.true_H[2, 2]
         self.noise, self.blur, self.line_mm = float(noise), float(blur), float(line_mm)
         self.rng = np.random.default_rng(seed)
+        self.person: tuple[float, float] | None = None     # (x, y) board mm of a person's chest, standing in front
         self.board_markers: list[dict] = []
         self.gondola_marker: dict | None = None
         self.dict_name = "4X4_50"
@@ -111,12 +112,17 @@ class SimCamera:
             return self._static
         w, h = self.size
         img = np.empty((h, w, 3), np.uint8)
-        img[:] = (150, 160, 168)
+        img[:] = (206, 208, 211)          # a white wall, like the real test setup
         b = self.cfg.board
         fr = 28.0
         self._poly(img, [(-fr, -fr), (b.width_mm + fr, -fr), (b.width_mm + fr, b.height_mm + fr), (-fr, b.height_mm + fr)],
                    (196, 198, 202), 6.0)
         self._poly(img, [(0, 0), (b.width_mm, 0), (b.width_mm, b.height_mm), (0, b.height_mm)], (236, 239, 241))
+        g = self.cfg.geometry
+        for ax, ay in (g.anchor_left, g.anchor_right):              # motor clamp on the frame, motor body, pulley
+            self._poly(img, [(ax - 45, b.height_mm - 5), (ax + 45, b.height_mm - 5), (ax + 45, b.height_mm + 14),
+                             (ax - 45, b.height_mm + 14)], (30, 30, 34), 12.0)
+            self._poly(img, [(ax - 21, ay - 21), (ax + 21, ay - 21), (ax + 21, ay + 21), (ax - 21, ay + 21)], (70, 72, 78), ANCHOR_Z)
         for m in self.board_markers:
             self._marker(img, m)
         gx, gy = np.meshgrid(np.linspace(-1, 1, w), np.linspace(-1, 1, h))
@@ -157,6 +163,8 @@ class SimCamera:
             img = (img * (1 - a * 0.9) + ink[:, :, :3] * (a * 0.9)).astype(np.uint8)
         if pen_xy is not None:
             self._draw_gondola(img, (float(pen_xy[0]), float(pen_xy[1])))
+        if self.person is not None:
+            self._draw_person(img, *self.person)
         if self._dmap is not None:
             img = cv2.remap(img, self._dmap[0], self._dmap[1], cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
         if self.blur > 0:
@@ -165,6 +173,15 @@ class SimCamera:
             n = self.rng.normal(0.0, self.noise, img.shape[:2]).astype(np.float32)[:, :, None]
             img = np.clip(img + n, 0, 255).astype(np.uint8)
         return img
+
+    def _draw_person(self, img, x, y, z=450.0):
+        col = (88, 76, 120)
+        self._poly(img, [(x - 210, y - 900), (x + 210, y - 900), (x + 230, y + 250), (x - 230, y + 250)], col, z)
+        head = self.project([(x, y + 420), (x + 110, y + 420)], z)
+        cv2.circle(img, tuple(np.round(head[0]).astype(int)), int(np.linalg.norm(head[1] - head[0])), (70, 90, 150), -1, cv2.LINE_AA)
+        arm = self.project([(x + 200, y + 200), (x + 520, y + 420)], z)
+        cv2.line(img, tuple(np.round(arm[0]).astype(int)), tuple(np.round(arm[1]).astype(int)), col,
+                 max(2, int(0.25 * self.scale_at((x, y)) * 110)), cv2.LINE_AA)
 
     def _draw_gondola(self, img, p):
         g = self.cfg.geometry

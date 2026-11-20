@@ -1,4 +1,4 @@
-// Formular-Bausteine: Zahlenfeld, Schalter, Segmente, Slider.
+// Form building blocks: number field, toggle, segmented control, slider.
 import { h } from './util.js';
 
 let uid = 0;
@@ -40,7 +40,7 @@ export function toggle({ label, checked = false, onChange }) {
   return { el, input, get: () => input.checked, set(v) { input.checked = !!v; } };
 }
 
-/** Segmentiertes Auswahlfeld. options: [{value, label, title}] */
+/** Segmented control. options: [{value, label, title}] */
 export function segmented({ options, value, onChange, label, fill = false }) {
   const btns = options.map((o) => h('button', {
     type: 'button', 'aria-pressed': String(o.value === value), title: o.title, dataset: { v: String(o.value) },
@@ -55,7 +55,7 @@ export function segmented({ options, value, onChange, label, fill = false }) {
   return { el, set, get: () => cur, buttons: btns };
 }
 
-/** Slider: onInput beim Ziehen, onChange beim Loslassen. */
+/** Slider: onInput while dragging, onChange on release. */
 export function slider({ min, max, step = 1, value = 0, onInput, onChange, label }) {
   const input = h('input', { type: 'range', min, max, step, value: String(value), 'aria-label': label });
   input.addEventListener('input', () => onInput?.(parseFloat(input.value)));
@@ -68,7 +68,7 @@ export function slider({ min, max, step = 1, value = 0, onInput, onChange, label
   };
 }
 
-/** Farbname → CSS-Farbe aus der Config (0-basierter Index). */
+/** Color hex from the config (0-based index). */
 export function colorHex(cfg, idx) {
   return cfg?.colors?.[idx]?.hex ?? '#111111';
 }

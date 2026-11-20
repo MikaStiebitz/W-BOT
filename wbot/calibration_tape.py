@@ -32,7 +32,7 @@ MAX_PAIRS = 200
 def tape_plan(cfg: Config, cols: int = 3, rows: int = 3, arm_mm: float = 12.0) -> dict:
     """Points to draw and the distances to measure (outer edges, diagonals, centre lines, spokes)."""
     if not (2 <= cols <= 5 and 2 <= rows <= 4):
-        raise CalibrationError("Spalten 2-5, Zeilen 2-4.")
+        raise CalibrationError("Columns 2-5, rows 2-4.")
     pts = tape_points(cfg, cols, rows, max(float(arm_mm), 20.0))
     by = {n: (x, y) for n, x, y in pts}
     grid = [[pts[r * cols + k][0] for k in range(cols)] for r in range(rows)]
@@ -66,38 +66,38 @@ def fit_distances(cfg: Config, reference: XY, ref_fw: XY | None, pairs: Sequence
     """``pairs``: (aimed-at point a, aimed-at point b, measured distance mm)."""
     n = len(pairs)
     if n > MAX_PAIRS:
-        raise CalibrationError(f"Zu viele Abstände (max. {MAX_PAIRS}).")
+        raise CalibrationError(f"Too many distances (max. {MAX_PAIRS}).")
     if n < 3:
-        raise CalibrationError("Mindestens 3 Abstände messen (empfohlen: alle aus der Liste).")
+        raise CalibrationError("Measure at least 3 distances (recommended: all of those in the list).")
     warnings: list[str] = []
     try:
         A = np.array([p[0] for p in pairs], float).reshape(-1, 2)
         B = np.array([p[1] for p in pairs], float).reshape(-1, 2)
         d = np.array([p[2] for p in pairs], float)
     except (TypeError, ValueError) as exc:
-        raise CalibrationError("Abstände ungültig (erwartet: Punkt a, Punkt b, gemessene mm).") from exc
+        raise CalibrationError("Invalid distances (expected: point a, point b, measured mm).") from exc
     if not (np.all(np.isfinite(A)) and np.all(np.isfinite(B)) and np.all(np.isfinite(d))) or np.any(d <= 0):
-        raise CalibrationError("Abstände enthalten ungültige Zahlen.")
+        raise CalibrationError("Distances contain invalid numbers.")
     nominal = np.linalg.norm(A - B, axis=1)
     if np.any(np.abs(d - nominal) > 0.05 * nominal + 20.0):
         bad = [i + 1 for i in np.where(np.abs(d - nominal) > 0.05 * nominal + 20.0)[0]]
-        raise CalibrationError(f"Abstand {', '.join(map(str, bad))} weicht mehr als 5 % vom Soll ab - vertippt oder "
-                               "falsches Punktpaar?")
+        raise CalibrationError(f"Distance {', '.join(map(str, bad))} deviates more than 5 % from nominal - typo or "
+                               "wrong pair of points?")
     if free is None:
         free = ("scale", "anchor_left", "anchor_right") if n >= 8 else ("scale",)
         if n < 8:
-            warnings.append(f"Nur {n} Abstände: es wird nur der Riemen-Maßstab angepasst.")
+            warnings.append(f"Only {n} distances: only the belt scale is adjusted.")
     names = [f for f in dict.fromkeys(free)]
     for nm in names:
         if nm not in _GROUPS or nm in ("reference", "pen_offset"):
-            raise CalibrationError(f"'{nm}' lässt sich aus Abständen nicht bestimmen.")
+            raise CalibrationError(f"'{nm}' cannot be determined from distances.")
     uniq, inv = np.unique(np.vstack([A, B]).round(6), axis=0, return_inverse=True)
     ia, ib = inv[:n], inv[n:]
     setup = _Setup(cfg, reference, ref_fw, uniq)
     nom = _nominal(cfg)
     comps = [_comp(nm, nom) for g in names for nm in _GROUPS[g]]
     if len(comps) > n:
-        raise CalibrationError(f"{len(comps)} freie Parameter bei {n} Abständen: zu wenige Messungen.")
+        raise CalibrationError(f"{len(comps)} free parameters with {n} distances: too few measurements.")
 
     def params(x):
         p = dict(nom)
@@ -123,19 +123,19 @@ def fit_distances(cfg: Config, reference: XY, ref_fw: XY | None, pairs: Sequence
     p = params(sol.x)
     improved = rms_b >= min_rms_mm and rms_a <= 0.85 * rms_b and rms_b - rms_a >= 0.3
     if not improved:
-        warnings.append(f"Abstände {rms_b:.2f} → {rms_a:.2f} mm rms: " +
-                        ("liegt im Bereich der Messgenauigkeit, keine Änderung nötig." if rms_b < min_rms_mm
-                         else "keine klare Verbesserung, Konfiguration bleibt."))
+        warnings.append(f"Distances {rms_b:.2f} → {rms_a:.2f} mm rms: " +
+                        ("within measurement accuracy, no change needed." if rms_b < min_rms_mm
+                         else "no clear improvement, configuration left unchanged."))
     patch = _build_patch(cfg, names, p) if improved else {}
     if patch:
         try:
             deep_update(cfg, patch)
         except Exception as exc:  # noqa: BLE001
-            warnings.append(f"Ergebnis ungültig ({exc}) - keine Änderung.")
+            warnings.append(f"Result invalid ({exc}) - no change.")
             patch, improved = {}, False
     bad = [i + 1 for i in np.where(np.abs(r1) > max(3.0, 4 * rms_a))[0]] if n >= 6 else []
     if bad:
-        warnings.append(f"Abstand {', '.join(map(str, bad))} passt nicht zu den anderen - bitte nachmessen.")
+        warnings.append(f"Distance {', '.join(map(str, bad))} does not fit the others - please measure again.")
     log.info("tape fit n=%d free=%s rms %.3f -> %.3f improved=%s", n, names, rms_b, rms_a, improved)
     return {"patch": patch, "improved": improved, "rms_before": rms_b, "rms_after": rms_a,
             "max_before": float(np.max(np.abs(r0))), "max_after": float(np.max(np.abs(r1))),
