@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/store.ts","./src/types.ts","./src/components/amspanel.tsx","./src/components/boardview.tsx","./src/components/statusbar.tsx","./src/components/panels/calibrationpanel.tsx","./src/components/panels/imagepanel.tsx","./src/components/panels/livepanel.tsx","./src/components/panels/manualpanel.tsx"],"version":"5.9.3"}

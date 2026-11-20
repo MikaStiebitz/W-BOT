@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wbbot"
+version = "0.11.0"
+description = "Control software for a V-shape whiteboard plotter (FluidNC / MKS DLC32)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "GPL-3.0-only" }
+
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "shapely>=2.0",
+    "PyYAML>=6.0",
+    "pyserial>=3.5",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "websockets>=12.0",
+    "python-multipart>=0.0.9",
+    "pydantic>=2.6",
+    "sympy>=1.12",
+    "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+imaging = [
+    "opencv-python-headless>=4.9",
+    "scikit-image>=0.22",
+]
+mcp = [
+    "mcp>=2.0",          # wbot/mcp_server.py (MCPServer, streamable HTTP)  [old wbbot.mcp targeted 1.x]
+    "httpx>=0.27",
+]
+paths = [
+    # vpype is used opportunistically by wbbot.paths.optimize when importable.
+    # The built-in optimizer is a full replacement, so this stays optional.
+    "vpype>=1.14",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "hypothesis>=6.98",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+wbot = "wbot.cli:main"
+wbbot = "wbbot.cli:main"
+wbbot-mcp = "wbbot.mcp.server:main"
+
+[tool.setuptools.packages.find]
+include = ["wbbot*", "wbot*"]
+
+[tool.setuptools.package-data]
+"wbbot.mcp.fonts" = ["*.json"]
+"wbot.data" = ["*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["wbot_tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "slow: long-running tests",
+    "hardware: requires real hardware (skipped by default)",
+    "imaging: requires OpenCV",
+]
+filterwarnings = ["ignore::DeprecationWarning"]
+asyncio_mode = "auto"

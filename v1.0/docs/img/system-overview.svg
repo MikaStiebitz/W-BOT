@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 640" width="900" height="640" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <title>W-BOT layout on the whiteboard</title>
+  <desc>Two motors at the top corners pull one belt to the gondola; counterweights hang on the free belt ends. The pen can reach a 1260 by 740 mm area.</desc>
+  <rect width="900" height="640" fill="#ffffff"/>
+  <style>.t{font-size:14px;fill:#1f2933}.s{font-size:12px;fill:#52606d}.h{font-size:16px;font-weight:700;fill:#102a43}</style>
+  <text x="20" y="28" class="h">How it hangs on the board</text>
+  <!-- board 1500x1000 at 0.5 scale: x=60..810, y=100..600 -->
+  <rect x="60" y="100" width="750" height="500" fill="#f8fafc" stroke="#486581" stroke-width="3"/>
+  <!-- usable area x120..1380 y10..750 -> x=120..750, y=225..595 -->
+  <rect x="120" y="225" width="630" height="370" fill="#e6f6f1" stroke="#2f9e83" stroke-width="2" stroke-dasharray="8 5"/>
+  <text x="435" y="560" text-anchor="middle" class="t" fill="#0b6b55" style="fill:#0b6b55;font-weight:700">drawing area  1260 × 740 mm</text>
+  <text x="435" y="580" text-anchor="middle" class="s">x 120–1380, y 10–750 (origin lower left)</text>
+  <!-- anchors -->
+  <circle cx="83.5" cy="89.5" r="13" fill="#fff" stroke="#243b53" stroke-width="3"/>
+  <circle cx="786.5" cy="89.5" r="13" fill="#fff" stroke="#243b53" stroke-width="3"/>
+  <rect x="40" y="48" width="86" height="30" rx="6" fill="#f0f4f8" stroke="#9fb3c8"/><text x="83" y="68" text-anchor="middle" class="t">Motor L</text>
+  <rect x="744" y="48" width="86" height="30" rx="6" fill="#f0f4f8" stroke="#9fb3c8"/><text x="787" y="68" text-anchor="middle" class="t">Motor R</text>
+  <!-- belts to gondola at (435, 400) attach at 176mm above pen -->
+  <polyline points="83.5,76.5 435,330" fill="none" stroke="#e8870e" stroke-width="3"/>
+  <polyline points="786.5,76.5 435,330" fill="none" stroke="#e8870e" stroke-width="3"/>
+  <circle cx="435" cy="330" r="5" fill="#e8870e"/>
+  <!-- gondola -->
+  <rect x="412" y="345" width="46" height="46" rx="6" fill="#fff" stroke="#243b53" stroke-width="2.5"/>
+  <circle cx="425" cy="358" r="4" fill="#c0392b"/><circle cx="445" cy="358" r="4" fill="#20252b"/><circle cx="435" cy="376" r="4" fill="#1f6fb5"/>
+  <text x="470" y="372" class="t">gondola (3 pens)</text>
+  <!-- counterweights on the free belt ends -->
+  <line x1="70.5" y1="89.5" x2="70.5" y2="520" stroke="#e8870e" stroke-width="3" stroke-dasharray="2 4"/>
+  <rect x="50" y="520" width="42" height="56" rx="5" fill="#d9e2ec" stroke="#486581" stroke-width="2"/><text x="71" y="552" text-anchor="middle" class="s">150 g</text>
+  <line x1="799.5" y1="89.5" x2="799.5" y2="520" stroke="#e8870e" stroke-width="3" stroke-dasharray="2 4"/>
+  <rect x="778" y="520" width="42" height="56" rx="5" fill="#d9e2ec" stroke="#486581" stroke-width="2"/><text x="799" y="552" text-anchor="middle" class="s">150 g</text>
+  <text x="108" y="518" class="s">counterweight on each free belt end</text>
+  <!-- dimensions -->
+  <line x1="60" y1="620" x2="810" y2="620" stroke="#829ab1"/><text x="435" y="636" text-anchor="middle" class="s">board 1500 mm</text>
+  <line x1="840" y1="100" x2="840" y2="600" stroke="#829ab1"/><text x="850" y="355" class="s" transform="rotate(90 850 355)" text-anchor="middle">board 1000 mm</text>
+  <!-- legend -->
+  <g transform="translate(400,400)"><line x1="0" y1="10" x2="26" y2="10" stroke="#e8870e" stroke-width="3"/><text x="34" y="14" class="s">GT2 belt: one piece, uncut at the gondola</text>
+  <circle cx="13" cy="34" r="8" fill="#fff" stroke="#243b53" stroke-width="3"/><text x="34" y="38" class="s">pulley (40 teeth) on each motor</text></g>
+  <text x="400" y="466" class="s">Anchors: (47, 1041) and (1453, 1041) mm</text>
+</svg>

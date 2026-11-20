@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.hypothesis/
+web/node_modules/
+web/dist/
+config/calibration.yaml
+config/fluidnc/
+*.tmp
+.DS_Store
+.impeccable/
+docs/*.tmp.png
+.impeccable/

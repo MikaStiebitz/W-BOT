@@ -1,0 +1,185 @@
+# =============================================================================
+# WBBOT — machine configuration
+# =============================================================================
+# All values from the hardware spec (section 2 of the project brief).
+# Every value here is overridable; calibration.yaml is deep-merged on top of
+# this file at load time, so the calibration wizard never edits this file.
+#
+# Coordinate system:
+#   origin (0,0) = LOWER-LEFT corner of the drawing area
+#   X to the right, Y up, all lengths in millimetres.
+# =============================================================================
+
+version: 1
+
+board:
+  width_mm: 1500.0
+  height_mm: 1000.0
+
+geometry:
+  # Anchor points = centre of the belt pulleys.
+  # 100 mm outboard of the drawing area, 350 mm above its top edge.
+  anchor_left: [-100.0, 1350.0]
+  anchor_right: [1600.0, 1350.0]
+
+  # GT2 40T pulley pitch radius: 40 * 2 mm / (2*pi) = 12.7324 mm
+  pulley_pitch_radius_mm: 12.732
+
+  # "naive"   -> belt runs to the pulley centre (what FluidNC computes)
+  # "tangent" -> belt leaves the pulley tangentially, incl. wrap term
+  # The calibration solver picks the model with the lower residual.
+  kinematics_model: tangent
+
+  # Pre-distort target coordinates so FluidNC's naive kinematics produces the
+  # belt lengths the tangent model demands. Off until calibration proves it
+  # is needed (see DECISIONS.md, D-004).
+  precompensate: false
+  # Reference point at which pre-compensation is exactly zero.
+  # null -> centroid of the safe area.
+  precompensate_reference: null
+
+drive:
+  motor_steps_per_rev: 200      # NEMA 17, 1.8 deg
+  microsteps: 16                # TMC2209 standalone, recommended 1/16
+  pulley_teeth: 40
+  belt_pitch_mm: 2.0
+  # steps_per_mm = motor_steps_per_rev * microsteps / (pulley_teeth * belt_pitch_mm)
+  #              = 200 * 16 / (40 * 2) = 40.0
+  # null -> derived from the values above. Calibration writes concrete numbers.
+  steps_per_mm_left: null
+  steps_per_mm_right: null
+  invert_left: false
+  invert_right: false
+
+  # Absolute belt length at machine zero. Established by the calibration
+  # wizard (tape-measure step). null -> unknown, homing/zeroing required.
+  belt_zero_left_mm: null
+  belt_zero_right_mm: null
+
+gondola:
+  mass_kg: 0.360
+  # Constant offset from the geometric suspension point to the pen tip.
+  # Independent of the selected colour (the revolver only exposes the pen at
+  # one fixed angular position). Calibrated, not computed per colour.
+  pen_offset_mm: [0.0, 0.0]
+  # Belt clamp points are 12 mm apart; the kinematic point is their midpoint.
+  belt_attach_spacing_mm: 12.0
+  marker_line_width_mm: 2.0
+  marker_diameter_mm: 16.8
+
+motion:
+  travel_feed_mm_min: 3000.0     # rapid, pen up
+  draw_feed_mm_min: 1500.0       # pen down
+  acceleration_mm_s2: 250.0
+  jerk_mm_min: 0.0               # FluidNC uses acceleration only
+  # How far the tool may cut a corner. Larger = smoother and faster, but the
+  # gondola pendulum rings more. 0 forces a full stop at every corner.
+  junction_deviation_mm: 0.05
+  # Pendulum settling: dwell after the pen is set down / lifted.
+  pen_down_dwell_s: 0.15
+  pen_up_dwell_s: 0.08
+  color_change_dwell_s: 0.60
+  # Park position used at job start/end (inside the safe area, top centre).
+  park_position: [750.0, 950.0]
+
+servo:
+  # --- Servo B: pen lift (FluidNC Z axis) ---------------------------------
+  # The FluidNC servo axis maps its travel linearly onto the pulse range, so
+  # we drive it in "axis units". We define 1 unit == 1 degree of servo travel.
+  pen:
+    axis: Z
+    axis_max_travel: 180.0
+    down_pos: 0.0        # pen touches the board
+    up_pos: 20.0         # pen clear of the board
+    pwm_hz: 50
+    min_pulse_us: 1000
+    max_pulse_us: 2000
+    output_pin: gpio.25
+  # --- Servo A: colour revolver (FluidNC A axis) --------------------------
+  # Mechanically -60 / 0 / +60 degrees. FluidNC axes cannot travel negative
+  # without homing, so the range is shifted by +90 deg: 30 / 90 / 150.
+  # See DECISIONS.md, D-006.
+  revolver:
+    axis: A
+    axis_max_travel: 180.0
+    positions: [30.0, 90.0, 150.0]   # colour 1 / 2 / 3
+    pwm_hz: 50
+    min_pulse_us: 1000
+    max_pulse_us: 2000
+    output_pin: gpio.32
+  # Feedrate used for pure servo-axis moves (axis units per minute).
+  feed_units_min: 3000.0
+  # Cut PWM when idle so the MG90S do not buzz and heat up.
+  # Handled firmware-side via stepping.idle_ms in the generated FluidNC config
+  # (there is no portable G-code for it — see DECISIONS.md, D-007).
+  # If your firmware build accepts an explicit command, put it here and it is
+  # appended at the end of every job.
+  idle_disable: true
+  idle_disable_after_s: 5.0
+  idle_disable_gcode: ""
+
+colors:
+  # Colour of the marker physically loaded in each revolver slot.
+  # Purely cosmetic for the UI + colour separation target.
+  - { slot: 1, name: "schwarz", hex: "#111111" }
+  - { slot: 2, name: "rot",     hex: "#d32f2f" }
+  - { slot: 3, name: "blau",    hex: "#1565c0" }
+
+safe_area:
+  # Margin from the physical board edge.
+  board_margin_mm: 10.0
+  # Minimum belt tension that must remain on BOTH belts (statics of the
+  # hanging gondola). Below this a belt goes slack and the gondola leaves
+  # the kinematic model.
+  min_tension_n: 0.25
+  # Position-error amplification ||J^-1||_2. Explodes when the belts become
+  # parallel (far below) or nearly horizontal (just under the anchor line).
+  max_error_amplification: 4.0
+  # Keep clear of the anchor line (y of the anchors).
+  min_distance_to_anchor_line_mm: 150.0
+  # Grid resolution used to rasterise the feasible region into a polygon.
+  grid_step_mm: 10.0
+
+connection:
+  # "simulator" | "serial" | "websocket"
+  transport: simulator
+  serial:
+    port: null            # e.g. COM5
+    baudrate: 115200
+    rx_buffer_bytes: 128  # FluidNC serial RX buffer, for character counting
+  websocket:
+    host: null            # e.g. 192.168.1.42
+    port: 81
+  status_poll_hz: 12.0
+  watchdog_timeout_s: 3.0
+
+paths:
+  # Douglas-Peucker tolerance; anything finer than the stroke width is wasted.
+  simplify_tolerance_mm: 0.5
+  # Join line ends that are closer than this.
+  merge_tolerance_mm: 1.0
+  # Drop contours shorter than this.
+  min_path_length_mm: 3.0
+  # Optimiser time budget.
+  optimize_time_budget_s: 5.0
+  two_opt_max_iterations: 20000
+
+imaging:
+  max_input_dimension_px: 1600
+  bilateral_d: 9
+  bilateral_sigma_color: 75.0
+  bilateral_sigma_space: 75.0
+  canny_low: 60
+  canny_high: 160
+  min_contour_points: 4
+
+camera:
+  enabled: false
+  device_index: 0
+  resolution: [1920, 1080]
+  # Homography camera-pixel -> board-mm; written by the camera calibration.
+  homography: null
+
+api:
+  host: "127.0.0.1"
+  port: 8000

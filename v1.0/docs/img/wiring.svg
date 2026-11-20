@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 650" width="960" height="650" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <title>W-BOT wiring diagram</title>
+  <desc>MKS DLC32 wiring: 24 V supply, two TMC2209 stepper drivers with NEMA 17 motors, two MG90S servos on a 5 V BEC with a common ground, USB to the PC.</desc>
+  <rect width="960" height="650" fill="#ffffff"/>
+  <style>
+    .t{font-size:14px;fill:#1f2933}.s{font-size:12px;fill:#52606d}.h{font-size:16px;font-weight:700;fill:#102a43}
+    .box{fill:#f0f4f8;stroke:#9fb3c8;stroke-width:1.5}.board{fill:#e6f6f1;stroke:#2f9e83;stroke-width:2.5}
+    .w{fill:none;stroke-width:4;stroke-linecap:round}.port{font-size:12px;font-weight:600;fill:#0b6b55}
+  </style>
+  <text x="20" y="30" class="h">W-BOT wiring (MKS DLC32 V2.1)</text>
+
+  <!-- wire legend -->
+  <g transform="translate(20,622)">
+    <line x1="0" y1="8" x2="26" y2="8" class="w" stroke="#d64545"/><text x="34" y="12" class="s">+24 V</text>
+    <line x1="90" y1="8" x2="116" y2="8" class="w" stroke="#e8870e"/><text x="124" y="12" class="s">+5 V</text>
+    <line x1="175" y1="8" x2="201" y2="8" class="w" stroke="#1f2933"/><text x="209" y="12" class="s">GND</text>
+    <line x1="255" y1="8" x2="281" y2="8" class="w" stroke="#2f80ed"/><text x="289" y="12" class="s">signal</text>
+    <line x1="350" y1="8" x2="376" y2="8" class="w" stroke="#2f9e83" stroke-dasharray="7 5"/><text x="384" y="12" class="s">common ground (BEC GND to board GND)</text>
+  </g>
+
+  <!-- PSU -->
+  <rect x="20" y="110" width="170" height="80" rx="10" class="box"/>
+  <text x="105" y="140" text-anchor="middle" class="t" font-weight="700">24 V / 5 A supply</text>
+  <text x="105" y="160" text-anchor="middle" class="s">5.5 × 2.1 plug</text>
+  <text x="105" y="176" text-anchor="middle" class="s">centre positive</text>
+
+  <!-- BEC -->
+  <rect x="20" y="290" width="170" height="100" rx="10" class="box"/>
+  <text x="105" y="320" text-anchor="middle" class="t" font-weight="700">5 V step-down (BEC)</text>
+  <text x="105" y="340" text-anchor="middle" class="s">≥ 2 A, for the servos</text>
+  <text x="105" y="358" text-anchor="middle" class="s">24 V in, 5 V out</text>
+
+  <!-- BOARD -->
+  <rect x="300" y="150" width="360" height="300" rx="14" class="board"/>
+  <text x="480" y="188" text-anchor="middle" class="h">MKS DLC32 V2.1</text>
+  <text x="480" y="208" text-anchor="middle" class="s">ESP32 · FluidNC v3.9.9</text>
+  <rect x="345" y="235" width="105" height="54" rx="6" fill="#fff" stroke="#2f9e83"/>
+  <text x="397" y="257" text-anchor="middle" class="t">TMC2209</text><text x="397" y="275" text-anchor="middle" class="s">socket X · 1/16</text>
+  <rect x="510" y="235" width="105" height="54" rx="6" fill="#fff" stroke="#2f9e83"/>
+  <text x="562" y="257" text-anchor="middle" class="t">TMC2209</text><text x="562" y="275" text-anchor="middle" class="s">socket Y · 1/16</text>
+  <text x="480" y="340" text-anchor="middle" class="s">Z + Y2 motor sockets stay empty</text>
+
+  <!-- DC jack -->
+  <text x="316" y="404" class="port">DC jack</text>
+
+  <!-- motors -->
+  <rect x="330" y="40" width="130" height="80" rx="10" class="box"/>
+  <text x="395" y="68" text-anchor="middle" class="t" font-weight="700">Motor LEFT</text><text x="395" y="86" text-anchor="middle" class="s">NEMA 17 → X-Motor</text><text x="395" y="104" text-anchor="middle" class="s">pulls the left belt</text>
+  <rect x="500" y="40" width="130" height="80" rx="10" class="box"/>
+  <text x="565" y="68" text-anchor="middle" class="t" font-weight="700">Motor RIGHT</text><text x="565" y="86" text-anchor="middle" class="s">NEMA 17 → Y1-Motor</text><text x="565" y="104" text-anchor="middle" class="s">pulls the right belt</text>
+  <path d="M385 120 V150" class="w" stroke="#2f80ed"/><path d="M405 120 V150" class="w" stroke="#8a4fff"/>
+  <path d="M555 120 V150" class="w" stroke="#2f80ed"/><path d="M575 120 V150" class="w" stroke="#8a4fff"/>
+  <text x="640" y="140" class="s">blue / purple = the two coil pairs</text>
+  
+  <!-- servos -->
+  <rect x="740" y="160" width="200" height="110" rx="10" class="box"/>
+  <text x="840" y="188" text-anchor="middle" class="t" font-weight="700">Servo A · revolver</text>
+  <text x="840" y="206" text-anchor="middle" class="s">MG90S · colour 1 / 2 / 3</text>
+  <rect x="740" y="330" width="200" height="110" rx="10" class="box"/>
+  <text x="840" y="358" text-anchor="middle" class="t" font-weight="700">Servo B · pen lift</text>
+  <text x="840" y="376" text-anchor="middle" class="s">MG90S · pen up / down</text>
+  <g class="s">
+    <text x="752" y="232">brown GND</text><text x="752" y="250">red +5 V   orange signal</text>
+    <text x="752" y="402">brown GND</text><text x="752" y="420">red +5 V   orange signal</text>
+  </g>
+
+  <!-- ports on board edge -->
+  <text x="650" y="228" text-anchor="end" class="port">TTL terminal · gpio.32</text>
+  <text x="650" y="398" text-anchor="end" class="port">I2C header SCL · gpio.4</text>
+
+  <!-- signal wires board -> servos -->
+  <path d="M660 215 H700 V200 H740" class="w" stroke="#2f80ed"/>
+  <path d="M660 385 H700 V370 H740" class="w" stroke="#2f80ed"/>
+
+  <!-- PSU to board -->
+  <path d="M190 135 H250 V410 H300" class="w" stroke="#d64545"/>
+  <path d="M190 165 H235 V428 H300" class="w" stroke="#1f2933"/>
+  <!-- PSU to BEC (24 V in) -->
+  <path d="M250 135 V300 H190" class="w" stroke="#d64545"/>
+  <path d="M235 165 V325 H190" class="w" stroke="#1f2933"/>
+
+  <!-- BEC out to servos (+5V and GND) -->
+  <path d="M190 350 H270 V510 H715 V240 H740" class="w" stroke="#e8870e"/>
+  <path d="M715 510 V410 H740" class="w" stroke="#e8870e"/>
+  <path d="M190 372 H285 V530 H700 V258 H740" class="w" stroke="#1f2933"/>
+  <path d="M700 530 V428 H740" class="w" stroke="#1f2933"/>
+  <!-- common ground BEC GND to board GND -->
+  <path d="M285 440 H300" class="w" stroke="#2f9e83" stroke-dasharray="7 5"/>
+  <path d="M285 372 V440" class="w" stroke="#2f9e83" stroke-dasharray="7 5"/>
+
+  <!-- USB -->
+  <rect x="400" y="545" width="160" height="50" rx="10" class="box"/>
+  <text x="480" y="567" text-anchor="middle" class="t" font-weight="700">PC</text><text x="480" y="583" text-anchor="middle" class="s">USB data cable · 115200 baud</text>
+  <path d="M480 450 V545" class="w" stroke="#9fb3c8"/>
+  <text x="492" y="500" class="port">USB (CH340)</text>
+
+  <!-- warnings -->
+  <rect x="690" y="460" width="260" height="62" rx="8" fill="#fff4cc" stroke="#e0b100"/>
+  <text x="702" y="480" class="t" font-weight="700">⚠ Check the TTL terminal pinout</text>
+  <text x="702" y="498" class="s">on the board silkscreen first: it carries</text>
+  <text x="702" y="514" class="s">12/24 V, not 5 V. Servos run on the BEC.</text>
+  <text x="20" y="450" class="s">Power off before plugging</text><text x="20" y="466" class="s">drivers or motors in or out.</text>
+</svg>

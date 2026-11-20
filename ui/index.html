@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>W-BOT Steuerung</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a7a74'/%3E%3Cpath d='M4 6 L16 20 L28 6' stroke='white' stroke-width='2.4' fill='none'/%3E%3Ccircle cx='16' cy='20' r='3.2' fill='white'/%3E%3C/svg%3E">
+  <script>
+    /* Theme vor dem ersten Paint setzen (kein Aufblitzen). */
+    try { var t = localStorage.getItem('wbot-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header class="top" id="top"></header>
+    <main id="main">
+      <section id="board-col" aria-label="Brettansicht"></section>
+      <section id="side" aria-label="Bedienung">
+        <div class="tabs" id="tabs" role="tablist" aria-label="Bereiche"></div>
+        <div class="panels" id="panels"></div>
+      </section>
+    </main>
+  </div>
+  <div id="toasts" role="status" aria-live="polite"></div>
+  <noscript><p style="padding:24px">Diese Oberfläche braucht JavaScript.</p></noscript>
+</body>
+</html>
