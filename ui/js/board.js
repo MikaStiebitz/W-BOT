@@ -16,6 +16,12 @@ const NICE = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
 const MINOR = { 5: 1, 10: 2, 20: 5, 50: 10, 100: 20, 200: 50, 500: 100, 1000: 200 };
 const MAX_TRACE = 40000;
 
+/** Margins [left, bottom, right, top] in mm: each side may override the common margin. */
+export function sideMargins(b) {
+  const m = b.margin_mm ?? 0;
+  return [b.margin_left_mm ?? m, b.margin_bottom_mm ?? m, b.margin_right_mm ?? m, b.margin_top_mm ?? m];
+}
+
 export function pushTrace(seg) {
   const t = store.get('trace');
   t.push(seg);
@@ -158,9 +164,9 @@ export function mountBoard(root) {
       line(major, th.major);
     }
     ctx.strokeStyle = th.edge; ctx.lineWidth = 2; ctx.strokeRect(bx, by, bw, bh);
-    const m = b.margin_mm, [sx, sy] = w2s(m, b.height_mm - m);
+    const [sl, sb, sr, st] = sideMargins(b), [sx, sy] = w2s(sl, b.height_mm - st);
     ctx.setLineDash([7, 5]); ctx.strokeStyle = th.safe; ctx.lineWidth = 1.5;
-    ctx.strokeRect(sx, sy, (b.width_mm - 2 * m) * view.scale, (b.height_mm - 2 * m) * view.scale);
+    ctx.strokeRect(sx, sy, (b.width_mm - sl - sr) * view.scale, (b.height_mm - sb - st) * view.scale);
     ctx.setLineDash([]);
   }
 

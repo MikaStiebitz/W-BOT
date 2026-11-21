@@ -34,8 +34,8 @@ export const info = (id) => store.get('preview')?.elements?.find((e) => e.id ===
 
 export function safeRect() {
   const b = store.get('config')?.board ?? { width_mm: 1500, height_mm: 1000, margin_mm: 40 };
-  const m = b.margin_mm ?? 0;
-  return [m, m, b.width_mm - m, b.height_mm - m];
+  const m = b.margin_mm ?? 0, l = b.margin_left_mm ?? m, bo = b.margin_bottom_mm ?? m, r = b.margin_right_mm ?? m, t = b.margin_top_mm ?? m;
+  return [l, bo, b.width_mm - r, b.height_mm - t];
 }
 
 function snapshot(key) {                       // history entry; edits of the same field within 800 ms share one entry

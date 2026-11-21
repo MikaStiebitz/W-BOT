@@ -18,7 +18,7 @@ The UI starts in the **simulator**; real hardware only opens on request (gear bu
 
 | Tab | What it does |
 |---|---|
-| **Draw** | Drop (or paste, or browse) a PNG, JPEG, WebP or SVG. Images are traced into pen paths and previewed on the board exactly as they will be plotted. *Style*: auto, lines (centre lines), outline, fill (hatching with the pen width). *Detail* sets resolution and precision; *Use all pen colours* splits the image over the pens. Samples are under "Or try a sample". |
+| **Draw** | A small canvas editor. Add **text** (11 single-line fonts: simple, sans, serif, italic, handwriting, cursive, title, Old English ...), **formulas** (LaTeX-style: fractions, roots, sums, integrals, matrices, Greek letters), **function plots** with axes (`y = f(x)`, parametric, polar, data points), **symbols** (hand-drawn pictures, maths and arrow glyphs, any emoji traced from the system emoji font) and **images** (traced into pen paths). Drag elements on the board, resize and rotate them with the handles (snap guides, arrow keys nudge, Ctrl+Z / Ctrl+Y undo and redo, Delete removes). The board shows exactly what will be plotted; parts outside the drawing area are clipped like the plotter does. ASCII art: tick *Fixed width* in the text options. Test patterns are under "Test patterns and samples". |
 | **Pens** | Interactive 3D revolver. Colour, name and line width of every pen; the width is used for the preview, the hatching and the sample stroke. |
 | **Setup** | One click: connect, find the camera picture, the whiteboard and the motors, and set the gondola position (in the simulator it is known; on real hardware the camera finds where the belts meet, or you click the gondola on the board). Measured motor positions are applied only after you confirm. |
 | **Move** | Jog, go to a point, park, pen up/down, position reference. |
@@ -27,6 +27,8 @@ The UI starts in the **simulator**; real hardware only opens on request (gear bu
 **Live draw** (button on the board toolbar): draw on the board with mouse or finger; the strokes are queued and the plotter follows with a lag (speed slider, Stop and Clear in the strip over the board).
 
 Errors appear as one dismissible notice per cause. Image upload API: `POST /api/import` (multipart `file` + JSON `options`: `mode`, `detail`, `invert`, `use_pen_colors`, `pen`).
+
+Canvas elements API: `POST /api/compose` (fast: drawing + per-element boxes), `POST /api/preview` and `POST /api/jobs` accept `elements` (a list of `{id, type: text|math|plot|symbol|image|pattern, x, y, rot, color, ...}`), `GET /api/elements/catalog` lists fonts, symbols and examples. Fonts: Hershey single-stroke data (see `wbot/data/hershey_fonts.NOTICE.txt`).
 
 ## Why it is accurate
 

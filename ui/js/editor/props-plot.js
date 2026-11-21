@@ -28,7 +28,7 @@ export function plotPanel(api) {
     kind.value = c.kind ?? 'y';
     kind.addEventListener('change', () => { sig = ''; setCurves((cs) => { cs[i].kind = kind.value; if (kind.value === 'param' && !cs[i].expr2) { cs[i].expr = 'cos(t)'; cs[i].expr2 = 'sin(t)'; } if (kind.value === 'polar') cs[i].expr = 't/2'; if (kind.value === 'y' && /t/.test(cs[i].expr)) cs[i].expr = 'x'; return cs; }); });
     const colors = store.get('config')?.colors ?? [];
-    const dot = h('button', { type: 'button', class: 'pen-dot', title: 'Next pen', 'aria-label': 'Change the pen of this curve', style: { '--c': colorHex(store.get('config'), c.color ?? 0) }, 'aria-pressed': 'true',
+    const dot = h('button', { type: 'button', class: 'pen-dot', title: 'Next pen', 'aria-label': 'Change the pen of this curve', style: { '--c': colorHex(store.get('config'), c.color ?? 0) },
       onClick: () => { sig = ''; setCurves((cs) => { cs[i].color = ((cs[i].color ?? 0) + 1) % Math.max(1, colors.length); return cs; }); } });
     const del = h('button', { class: 'btn sm ghost icon-only', type: 'button', title: 'Remove curve', 'aria-label': 'Remove curve', disabled: n < 2, onClick: () => { sig = ''; setCurves((cs) => { cs.splice(i, 1); return cs; }); } }, icon('x'));
     const input = (key, ph, label) => {
