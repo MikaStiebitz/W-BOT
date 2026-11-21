@@ -178,6 +178,7 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
 
     def _sim_kwargs(self, sim: dict) -> dict:
         kw: dict[str, Any] = {}
+        self.sim_speed = float(sim.get("speed") or 1.0)          # real-time factor of the simulator (estimates divide by it)
         if "speed" in sim and sim["speed"]:
             kw["speed"] = float(sim["speed"])
         kw["physical_start"] = tuple(sim.get("physical_start") or self.cfg.firmware.boot_physical)

@@ -171,8 +171,11 @@ export function mountDraw(root) {
     summary.hidden = !pv;
     if (!pv) return;
     const st = pv.stats ?? {};
-    const chip = (ic, v) => h('span', { class: 'sum' }, ic ? icon(ic) : null, v);
-    summary.append(chip('play', `≈ ${fmtDur(pv.estimated_s)}`), chip(null, `${fmt(st.strokes, 0)} paths`), chip(null, `${fmt((st.draw_mm ?? 0) / 1000, 1)} m of line`));
+    const chip = (ic, v, title) => h('span', { class: 'sum', title }, ic ? icon(ic) : null, v);
+    const e = pv.estimate, learned = e && e.samples >= 3 && Math.abs(e.factor - 1) > 0.02;
+    const basis = !e ? '' : learned ? `Model estimate corrected by ${e.samples} finished drawings (real time was ×${e.factor} of the model).`
+      : 'Model estimate from path length, feed rates, acceleration and pen moves. It gets better with every finished drawing.';
+    summary.append(chip('play', `≈ ${fmtDur(pv.estimated_s)}`, basis), chip(null, `${fmt(st.strokes, 0)} paths`), chip(null, `${fmt((st.draw_mm ?? 0) / 1000, 1)} m of line`));
     if (st.color_changes) summary.append(chip('refresh', `${fmt(st.color_changes, 0)} pen changes`));
     const seen = new Set();
     for (const w of [...(pv.warnings ?? []), ...(source.warnings ?? [])]) if (!seen.has(w)) { seen.add(w); warns.append(h('div', { class: 'note warn' }, w)); }

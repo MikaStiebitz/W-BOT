@@ -50,12 +50,14 @@ class PlanLine:
     phys: tuple[float, float] | None = None
     color: int | None = None         # active slot after this line
     pen_down: bool | None = None     # pen state after this line
+    t: float = 0.0                   # rough duration of this line in seconds (weights for the progress estimate)
 
 
 @dataclass
 class Plan:
     lines: list[PlanLine] = field(default_factory=list)
     estimated_s: float = 0.0
+    line_end: list[float] = field(default_factory=list)   # estimated time (s) at which each line has finished
     stats: dict = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
@@ -163,6 +165,7 @@ class _Emitter:
         self._break()
         self.time += s
         self.add(dwell_gcode(s), "dwell", self.phys)
+        self.lines[-1].t = s
 
     def servo(self, which: str, deg: float) -> None:
         spec = self.cfg.servos.pen if which == "pen" else self.cfg.servos.revolver
@@ -177,6 +180,7 @@ class _Emitter:
         else:
             self.rev_deg = deg
         self.add(text, "pen" if which == "pen" else "color", self.phys)
+        self.lines[-1].t = span / spec.speed_deg_s
 
     def xy(self, fw: tuple[float, float], phys: tuple[float, float], feed: int, kind: str) -> None:
         x, y = _n(fw[0]), _n(fw[1])
@@ -190,9 +194,11 @@ class _Emitter:
             self.run = [self.fw_pos or (fx, fy)]
         self.run.append((fx, fy))
         self.run_feeds.append(feed / 60.0)
+        dist = math.hypot(fx - self.run[-2][0], fy - self.run[-2][1]) if len(self.run) > 1 else 0.0
         self.fw_pos = (fx, fy)
         self.phys = phys
         self.add(text, kind, phys)
+        self.lines[-1].t = dist / max(feed / 60.0, 1e-6)
 
     # -- composite moves
     def path(self, pts: np.ndarray, feed: int, kind: str, include_first: bool) -> None:
@@ -320,6 +326,9 @@ def plan(drawing: Drawing, cfg: Config, mapping: Mapping, opts: PlanOptions | No
 
     lines = em.lines
     plan_ = Plan(lines=lines, estimated_s=em.time, warnings=warnings)
+    raw = np.cumsum([ln.t for ln in lines]) if lines else np.zeros(0)
+    if len(raw) and raw[-1] > 0:                          # spread the modelled total (with acceleration) over the lines
+        plan_.line_end = (raw * (em.time / raw[-1])).tolist()
     plan_.stats = {
         "strokes": n_draw,
         "draw_mm": round(draw_mm, 1),

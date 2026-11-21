@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from .drawing import Drawing
+from .estimate import JobHistory, eta_s
 from .kinematics import Mapping
 from .patterns import REGISTRY, build_pattern, pattern_to_dict
 from .planner import PlanOptions, plan as make_plan
@@ -31,6 +32,10 @@ class JobManager:
         self._t0 = 0.0
         self._plan = None
         self._trace_from = 0
+        self._est: dict = {}
+        self._live = False
+        from .machine import STATE_DIR
+        self.history = JobHistory(STATE_DIR / "job_history.json" if machine.persist else None)   # learns from finished jobs
 
     # ----------------------------------------------------------------- helpers
     @property
@@ -107,8 +112,25 @@ class JobManager:
         warnings = list(p.warnings)
         if not real:
             warnings.append("No reference set - time estimate uses an assumed reference.")
+        est = self._estimate(p.estimated_s)
         return {"drawing": d.to_json(), "bounds": [float(v) for v in d.bounds()],
-                "estimated_s": float(p.estimated_s), "warnings": warnings, "stats": p.stats}
+                "estimated_s": est["estimated_s"], "estimate": est, "warnings": warnings, "stats": p.stats}
+
+    # ---------------------------------------------------------------- estimates
+    def _transport(self) -> str:
+        return self.m.transport or self.m.cfg.connection.transport
+
+    def _sim_speed(self) -> float:
+        return max(float(getattr(self.m, "sim_speed", 1.0) or 1.0), 1e-6) if self._transport() == "sim" else 1.0
+
+    def _estimate(self, modelled_s: float) -> dict:
+        """Modelled time corrected by what past jobs on this kind of connection really took."""
+        e = self.history.estimate(modelled_s, self._transport())
+        sp = self._sim_speed()
+        if sp != 1.0:                                   # the simulator may run faster than real time
+            e["sim_speed"] = sp
+            e["estimated_s"] = round(e["estimated_s"] / sp, 1)
+        return e
 
     # --------------------------------------------------------------------- job
     def start(self, body: dict) -> dict:
@@ -140,9 +162,12 @@ class JobManager:
         emu = m._emulator()
         self._trace_from = len(emu.trace) if emu is not None else 0
         self._cancel.clear()
+        self._est = self._estimate(plan.estimated_s)
+        self._live = live
         self.job = {"id": uuid.uuid4().hex[:8], "name": body.get("name") or d.name or "Job",
                     "state": "running", "dry_run": opts.dry_run, "progress": 0.0, "line": 0,
-                    "total": len(lines), "elapsed_s": 0.0, "eta_s": float(plan.estimated_s), "message": ""}
+                    "total": len(lines), "elapsed_s": 0.0, "eta_s": self._est["estimated_s"],
+                    "estimated_s": self._est["estimated_s"], "message": ""}
         self._t0 = time.monotonic()
         self._thread = threading.Thread(target=self._run, args=(lines,), name="job", daemon=True)
         self._thread.start()
@@ -159,12 +184,15 @@ class JobManager:
     def _run(self, lines: list[str]) -> None:
         m, job = self.m, self.job
         total = len(lines)
-        est = self._plan.estimated_s
+        plan, est = self._plan, self._est
+        sp, factor = est.get("sim_speed", 1.0), est.get("factor", 1.0)
 
         def progress(done: int, _total: int) -> None:
             frac = done / total if total else 1.0
             job["line"], job["progress"] = done, round(frac, 4)
-            job["eta_s"] = round(max(0.0, est * (1 - frac)), 1)
+            # remaining time from the modelled time of the lines done so far, blended with this job's real pace
+            t_done = plan.line_end[min(done, len(plan.line_end)) - 1] if done and plan.line_end else frac * plan.estimated_s
+            job["eta_s"] = round(eta_s(plan.estimated_s, t_done, (time.monotonic() - self._t0) * sp, factor) / sp, 1)
             self._publish()
 
         try:
@@ -181,7 +209,12 @@ class JobManager:
                         return
                     raise RuntimeError("Timed out waiting for the job to finish.")
             job["state"], job["progress"], job["eta_s"] = "done", 1.0, 0.0
-            m.log("info", f"Job '{job['name']}' finished.")
+            elapsed = time.monotonic() - self._t0
+            if not job.get("dry_run") and not self._live:            # learn: modelled vs. real duration
+                self.history.record(transport=self._transport(), est_s=plan.estimated_s, actual_s=elapsed * sp,
+                                    draw_mm=float(plan.stats.get("draw_mm", 0.0)), travel_mm=float(plan.stats.get("travel_mm", 0.0)),
+                                    strokes=int(plan.stats.get("strokes", 0)))
+            m.log("info", f"Job '{job['name']}' finished in {elapsed:.0f} s (estimated {job.get('estimated_s', 0):.0f} s).")
         except Exception as exc:  # noqa: BLE001
             if job["state"] not in ("cancelled",):
                 job["state"], job["message"] = "error", str(exc)
