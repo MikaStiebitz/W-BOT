@@ -14,6 +14,8 @@ Hardware versions live in their own folder (`v1.0/`, `v1.1/`, …). Software cha
 - Photo style for image import (edge-based outlines for photos and renders)
 - The drawing (image, trace options, size and position, live strokes) survives a page reload
 - Time estimate that learns from finished drawings and a better remaining-time display while drawing
+- Canvas editor in the Draw tab: text, formulas, function plots, symbols, emoji and images as movable elements
+- "Show writing" overlay and a check before drawing over existing writing (camera)
 - Whiteboard quiz over MCP and a check against writing already on the board (camera)
 - New slider look; tests run against the built-in defaults instead of the local `config/wbot.yaml`
 
