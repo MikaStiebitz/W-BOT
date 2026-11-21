@@ -210,7 +210,7 @@ def render_plot(spec: dict, palette_size: int = 8) -> list[Stroke]:
     ax_y = (cross_y - ymin) * sy if axes == "cross" else 0.0
     tick = 1.4
     if spec.get("grid", True):
-        dash, gap = 1.6, 2.4
+        dash, gap = 0.9, 4.1
         for v in xt:
             gx = (v - x0) * sx
             y = 0.0

@@ -223,6 +223,10 @@ def create_app(machine: Machine | None = None, *, serve_ui: bool = True) -> Fast
         from ..elements import catalog
         return await run(catalog)
 
+    @app.post("/api/compose")
+    async def compose(b: PlanBody):
+        return await run(m.compose, b.model_dump())
+
     @app.post("/api/preview")
     async def preview(b: PlanBody):
         return await run(m.preview, b.model_dump())

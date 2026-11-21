@@ -16,7 +16,7 @@ from functools import lru_cache
 import numpy as np
 
 from .config import Config
-from .drawing import Drawing, Stroke
+from .drawing import Drawing, Stroke, clip_to_rect, count_outside
 from .icons import EMOJI_ICON, ICONS, icon_list, icon_strokes
 from .mathglyphs import special as math_special
 from .mathlayout import MathError, layout_math
@@ -79,6 +79,8 @@ _EMOJI_FONTS = [r"C:\Windows\Fonts\seguiemj.ttf", "/usr/share/fonts/truetype/not
 
 @lru_cache(maxsize=256)
 def _trace_emoji(char: str) -> tuple[tuple, ...]:
+    """Line art of a colour emoji: its silhouette plus the inner colour edges, as centre lines."""
+    import cv2
     from PIL import Image, ImageDraw, ImageFont
 
     from .imagetrace import ImageError, TraceOptions, trace_image
@@ -86,14 +88,25 @@ def _trace_emoji(char: str) -> tuple[tuple, ...]:
     if path is None:
         raise ElementError("No emoji font was found on this computer. Pick one of the drawn symbols instead.")
     try:
-        font = ImageFont.truetype(path, 109 if "Noto" in path else 160)
-        size = 260
-        im = Image.new("RGBA", (size, size), (255, 255, 255, 255))
+        font = ImageFont.truetype(path, 109 if "Noto" in path else 200)
+        size = 360
+        im = Image.new("RGBA", (size, size), (255, 255, 255, 0))
         ImageDraw.Draw(im).text((size // 2, size // 2), char, font=font, anchor="mm", embedded_color=True)
-        buf = io.BytesIO()
-        im.save(buf, "PNG")
-        cfg = Config()
-        res = trace_image(buf.getvalue(), cfg, TraceOptions(mode="photo", detail=60, fit_rect=(0, 0, 100, 100)))
+        rgba = np.asarray(im)
+        mask = (rgba[..., 3] > 40).astype(np.uint8) * 255
+        if not mask.any():
+            raise ElementError("This emoji is not in the system emoji font.")
+        white = np.full(rgba.shape[:2] + (3,), 255, np.uint8)
+        a = rgba[..., 3:4] / 255.0
+        rgb = (rgba[..., :3] * a + white * (1 - a)).astype(np.uint8)
+        gray = cv2.GaussianBlur(cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY), (0, 0), 1.6)
+        edges = cv2.bitwise_and(cv2.Canny(gray, 50, 130), cv2.erode(mask, np.ones((11, 11), np.uint8)))
+        canvas = np.full(mask.shape, 255, np.uint8)
+        contours, _ = cv2.findContours(mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+        cv2.drawContours(canvas, contours, -1, 0, 3)
+        canvas[cv2.dilate(edges, np.ones((3, 3), np.uint8)) > 0] = 0
+        ok, png = cv2.imencode(".png", canvas)
+        res = trace_image(png.tobytes(), Config(), TraceOptions(mode="lines", detail=70, fit_rect=(0, 0, 100, 100)))
     except (ImageError, OSError, ValueError) as exc:
         raise ElementError(f"This emoji cannot be drawn ({exc}).") from exc
     return tuple(tuple(map(tuple, s.pts.tolist())) for s in res.drawing.strokes)
@@ -209,16 +222,19 @@ def compose(elements: list[dict], cfg: Config) -> tuple[Drawing, list[dict]]:
     if len(elements) > MAX_ELEMENTS:
         raise ElementError(f"At most {MAX_ELEMENTS} elements are supported.")
     out, meta = Drawing([], "elements"), []
+    rect = cfg.safe_rect()
     for i, el in enumerate(elements):
-        info = {"id": el.get("id", i), "bbox": None, "range": [len(out.strokes), len(out.strokes)], "error": None}
+        info = {"id": el.get("id", i), "bbox": None, "range": [len(out.strokes), len(out.strokes)], "error": None, "clipped": False}
         try:
             d = render_element(el, cfg)
+            b = d.bounds()
+            info["bbox"] = [round(v, 2) for v in b] if b else None          # selection box: the whole element
+            if count_outside(d, rect):                                      # the plotter only draws inside the safe area
+                d, info["clipped"] = clip_to_rect(d, rect), True
             if len(out.strokes) + len(d.strokes) > MAX_STROKES:
                 raise ElementError("Too many lines for one drawing.")
             out.extend(d)
             info["range"][1] = len(out.strokes)
-            b = d.bounds()
-            info["bbox"] = [round(v, 2) for v in b] if b else None
         except ElementError as exc:
             info["error"] = str(exc)
         meta.append(info)
@@ -276,7 +292,8 @@ def catalog() -> dict:
             if polys:
                 gl.append({"id": sid, "strokes": _flat([np.array(p) for p in polys])})
         groups.append({"name": name, "glyphs": gl})
-    return {"fonts": fonts, "icons": icons, "glyph_groups": groups,
+    from .imagetrace import MODES
+    return {"fonts": fonts, "icons": icons, "trace_modes": list(MODES), "glyph_groups": groups,
             "ascii_art": [{"name": n, "text": t} for n, t in ASCII_ART],
             "plot_presets": [{"name": n, "spec": s} for n, s in PLOT_PRESETS],
             "emoji": ["😀", "😎", "🤔", "😂", "🥳", "👍", "🎉", "🔥", "🌈", "🐱", "🐶", "🍕", "⚽", "🚗", "✈", "🎸"]}

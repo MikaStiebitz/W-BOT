@@ -484,6 +484,9 @@ class Machine(ReferenceMixin, MotionMixin, SimMixin):
     def preview(self, body: dict) -> dict:
         return self._jobs().preview(body)
 
+    def compose(self, body: dict) -> dict:
+        return self._jobs().compose(body)
+
     def start_job(self, body: dict) -> dict:
         if self.camera is not None:
             self.camera.check_clear(body)          # nobody standing at the board (if the camera guard is on)

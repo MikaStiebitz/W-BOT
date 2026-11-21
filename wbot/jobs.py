@@ -72,7 +72,7 @@ class JobManager:
         res.drawing.name = name
         return {"drawing": res.drawing.to_json(), "info": res.info, "warnings": res.warnings}
 
-    def resolve(self, body: dict, meta: list | None = None) -> Drawing:
+    def resolve(self, body: dict, meta: list | None = None, allow_empty: bool = False) -> Drawing:
         """Drawing of a request body: canvas elements, a traced drawing or a test pattern, then the layout.
         ``meta`` (a list) receives the per-element boxes and stroke ranges when elements are used."""
         from .machine import MachineError
@@ -86,7 +86,7 @@ class JobManager:
                     raise MachineError(str(exc), "bad_request", 400) from exc
                 if meta is not None:
                     meta.extend(info)
-                if not d.strokes:
+                if not d.strokes and not allow_empty:
                     raise MachineError("Add something to draw first.", "bad_request", 400)
             elif body.get("drawing"):
                 d = Drawing.from_json(body["drawing"])
@@ -114,9 +114,19 @@ class JobManager:
         c = (self.m.cfg.board.width_mm / 2, self.m.cfg.board.height_mm / 2)
         return Mapping.from_config(self.m.cfg, c, c), False
 
+    def compose(self, body: dict) -> dict:
+        """Fast preview of canvas elements: the drawing and each element's box, without planning the pen path."""
+        meta: list = []
+        d = self.resolve(body, meta, allow_empty=True)
+        b = d.bounds()
+        return {"drawing": d.to_json(), "bounds": None if b is None else [float(v) for v in b], "elements": meta}
+
     def preview(self, body: dict) -> dict:
         meta: list = []
-        d = self.resolve(body, meta)
+        d = self.resolve(body, meta, allow_empty=True)
+        if body.get("elements") is not None and not d.strokes:      # nothing drawable yet: still report each element's error
+            return {"drawing": {"name": "", "strokes": []}, "bounds": None, "estimated_s": 0.0, "warnings": [],
+                    "stats": {"strokes": 0, "draw_mm": 0.0}, "elements": meta}
         mp, real = self._mapping()
         live = bool(body.get("live"))
         opts = PlanOptions(dry_run=bool(body.get("dry_run")), speed_scale=float(body.get("speed_scale") or 1.0),

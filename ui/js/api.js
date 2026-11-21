@@ -86,6 +86,8 @@ export const api = {
   gcode: (line) => post('/gcode', { line }),
   patterns: (o) => get('/patterns', o),
   preview: (body, o) => request('POST', '/preview', body, o),
+  compose: (body, o) => request('POST', '/compose', body, o),
+  elementsCatalog: (o) => get('/elements/catalog', o),
   startJob: async (body) => {
     try { return await post('/jobs', body, { quiet: true }); }
     catch (e) {

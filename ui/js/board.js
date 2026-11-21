@@ -9,6 +9,7 @@ import { drawCalibration } from './board-calib.js';
 import { mountBoardCam } from './board-cam.js';
 import { live, mountLiveBar, onLiveInk } from './live.js';
 import { api } from './api.js';
+import { mountBoardEdit } from './editor/board-edit.js';
 
 const RL = 42, RB = 24, PAD = 12;                       // Lineal links / unten, Rand
 const NICE = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
@@ -132,7 +133,7 @@ export function mountBoard(root) {
     if (!cfg) return;
     ctx.save();
     ctx.beginPath(); ctx.rect(RL, 0, W - RL, H - RB); ctx.clip();
-    drawBoard(cfg); cam.draw(ctx, w2s, view.scale); ga = cam.inkAlpha(); drawOccupancy(); drawPreview(cfg); drawTrace(cfg); drawLive(cfg); ga = 1; drawMachine(cfg); drawCamTrack(); drawCalibration(ctx, w2s, th, viewing('kalib') ? store.get('calib') : null, view, W, RL); drawTarget(); drawHover();
+    drawBoard(cfg); cam.draw(ctx, w2s, view.scale); ga = cam.inkAlpha(); drawOccupancy(); drawPreview(cfg); edit.draw(ctx, th); drawTrace(cfg); drawLive(cfg); ga = 1; drawMachine(cfg); drawCamTrack(); drawCalibration(ctx, w2s, th, viewing('kalib') ? store.get('calib') : null, view, W, RL); drawTarget(); drawHover();
     ctx.restore();
     drawRulers();
   }
@@ -368,6 +369,7 @@ export function mountBoard(root) {
     readout.textContent = txt; readout.hidden = false;
   }
 
+  const edit = mountBoardEdit({ canvas, local, w2s, s2w, scale: () => view.scale, invalidate, busy: () => live.on, area: () => [RL, 0, W, H - RB] });
   let liveDown = null;                                 // pointer id of the stroke being drawn in live mode
   canvas.addEventListener('pointerdown', (e) => {
     if (live.on) {
@@ -378,6 +380,7 @@ export function mountBoard(root) {
       }
       return;
     }
+    if (edit.down(e)) return;
     try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic */ }
     ptrs.set(e.pointerId, local(e));
     if (ptrs.size === 1) { startPt = local(e); moved = false; }
@@ -385,6 +388,7 @@ export function mountBoard(root) {
   });
   canvas.addEventListener('pointermove', (e) => {
     if (liveDown === e.pointerId) { const q = local(e); live.move(...s2w(...q)); hover = s2w(...q); updateReadout(); return; }
+    if (edit.move(e)) return;
     const p = local(e);
     if (e.pointerType === 'mouse' || !ptrs.size) { hover = p[0] >= RL && p[1] <= H - RB ? s2w(...p) : null; updateReadout(); invalidate(); }
     if (!ptrs.has(e.pointerId)) return;
@@ -400,6 +404,7 @@ export function mountBoard(root) {
   });
   const end = (e) => {
     if (liveDown === e.pointerId) { liveDown = null; live.end(); return; }
+    if (edit.up(e)) return;
     const was = ptrs.size;
     ptrs.delete(e.pointerId);
     if (ptrs.size < 2) pinch = null;

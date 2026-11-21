@@ -101,5 +101,20 @@ def test_preview_and_job_accept_elements(client):
     assert r.status_code == 200, r.text
     pv = r.json()
     assert [e["id"] for e in pv["elements"]] == ["a", "b"] and pv["stats"]["strokes"] > 5
-    assert client.post("/api/preview", json={"elements": []}).status_code == 400
+    empty = client.post("/api/preview", json={"elements": [{"id": "x", "type": "math", "latex": r"\frac{"}]}).json()
+    assert empty["elements"][0]["error"] and empty["drawing"]["strokes"] == []
     assert client.get("/api/elements/catalog").json()["fonts"]
+
+
+def test_compose_is_fast_and_reports_elements(client):
+    r = client.post("/api/compose", json={"elements": [{"id": "a", "type": "text", "text": "Hi", "x": 700, "y": 500}]})
+    assert r.status_code == 200 and r.json()["elements"][0]["bbox"] and r.json()["drawing"]["strokes"]
+    assert client.post("/api/compose", json={"elements": []}).json()["bounds"] is None
+
+
+def test_parts_outside_the_safe_area_are_clipped_like_the_plotter_does():
+    big = {"id": "t", "type": "text", "text": "HELLO", "size": 80, "x": 10, "y": 500}
+    d, meta = compose([big], CFG)
+    x0 = CFG.safe_rect()[0]
+    assert meta[0]["clipped"] and meta[0]["bbox"][0] < x0               # box still covers the whole text
+    assert min(s.pts[:, 0].min() for s in d.strokes) >= x0 - 1e-6        # but nothing is drawn outside
