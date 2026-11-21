@@ -55,7 +55,7 @@ include = ["wbbot*", "wbot*"]
 
 [tool.setuptools.package-data]
 "wbbot.mcp.fonts" = ["*.json"]
-"wbot.data" = ["*.json"]
+"wbot.data" = ["*.json", "*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["wbot_tests"]

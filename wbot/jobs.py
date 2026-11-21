@@ -72,11 +72,23 @@ class JobManager:
         res.drawing.name = name
         return {"drawing": res.drawing.to_json(), "info": res.info, "warnings": res.warnings}
 
-    def resolve(self, body: dict) -> Drawing:
+    def resolve(self, body: dict, meta: list | None = None) -> Drawing:
+        """Drawing of a request body: canvas elements, a traced drawing or a test pattern, then the layout.
+        ``meta`` (a list) receives the per-element boxes and stroke ranges when elements are used."""
         from .machine import MachineError
         cfg = self.m.cfg
         try:
-            if body.get("drawing"):
+            if body.get("elements") is not None:
+                from .elements import ElementError, compose
+                try:
+                    d, info = compose(list(body["elements"]), cfg)
+                except ElementError as exc:
+                    raise MachineError(str(exc), "bad_request", 400) from exc
+                if meta is not None:
+                    meta.extend(info)
+                if not d.strokes:
+                    raise MachineError("Add something to draw first.", "bad_request", 400)
+            elif body.get("drawing"):
                 d = Drawing.from_json(body["drawing"])
             elif body.get("pattern"):
                 pat = body["pattern"]
@@ -103,7 +115,8 @@ class JobManager:
         return Mapping.from_config(self.m.cfg, c, c), False
 
     def preview(self, body: dict) -> dict:
-        d = self.resolve(body)
+        meta: list = []
+        d = self.resolve(body, meta)
         mp, real = self._mapping()
         live = bool(body.get("live"))
         opts = PlanOptions(dry_run=bool(body.get("dry_run")), speed_scale=float(body.get("speed_scale") or 1.0),
@@ -113,8 +126,11 @@ class JobManager:
         if not real:
             warnings.append("No reference set - time estimate uses an assumed reference.")
         est = self._estimate(p.estimated_s)
-        return {"drawing": d.to_json(), "bounds": [float(v) for v in d.bounds()],
-                "estimated_s": est["estimated_s"], "estimate": est, "warnings": warnings, "stats": p.stats}
+        out = {"drawing": d.to_json(), "bounds": [float(v) for v in d.bounds()],
+               "estimated_s": est["estimated_s"], "estimate": est, "warnings": warnings, "stats": p.stats}
+        if body.get("elements") is not None:
+            out["elements"] = meta
+        return out
 
     # ---------------------------------------------------------------- estimates
     def _transport(self) -> str:

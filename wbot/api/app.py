@@ -75,6 +75,7 @@ class GcodeBody(_Body):
 class PlanBody(_Body):
     pattern: dict | None = None
     drawing: dict | None = None
+    elements: list[dict] | None = None     # canvas elements (text, formulas, plots, symbols, images)
     layout: dict | None = None
     dry_run: bool = False
     speed_scale: float = 1.0
@@ -216,6 +217,11 @@ def create_app(machine: Machine | None = None, *, serve_ui: bool = True) -> Fast
     @app.get("/api/patterns")
     async def patterns():
         return m.patterns()
+
+    @app.get("/api/elements/catalog")
+    async def elements_catalog():
+        from ..elements import catalog
+        return await run(catalog)
 
     @app.post("/api/preview")
     async def preview(b: PlanBody):
