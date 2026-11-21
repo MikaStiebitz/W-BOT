@@ -4,6 +4,10 @@
     PUT    /api/camera {patch}              -> info   (source, rotate, mirror, markers, tracking, view, line_mm, latency_ms)
     GET    /api/camera/devices              -> [{index, size, backend, thumb (data URL)}]   (slow: probes devices)
     GET    /api/camera/frame.jpg?view=raw|board&w=&q=&overlay=0|1&hide=0|1 -> image/jpeg (hide: person filtered out)
+    POST   /api/camera/region {rect, px_per_mm?, hide?, frames?, inset_mm?} -> sharp top-down crop + ink in it
+    GET    /api/camera/free-space?w=&h=&margin=&count= -> empty places of that size in the usable area
+    GET    /api/camera/occupancy?cell=10 -> what is already written: cell grid (0 free, 1 ink, 2 unseen) + boxes
+    POST   /api/camera/overlap {strokes | drawing, margin_mm?} -> overlap_pct, hit boxes, free place to move to
     GET    /api/camera/suggest-board        -> {image_points, board_points, image_size}  (not applied)
     POST   /api/camera/calibrate {image_points, board_points, method?} -> {rms_px, rms_mm, warnings, coverage}
     POST   /api/camera/calibrate/markers    -> same + {markers, missing}
@@ -109,6 +113,32 @@ def register_camera_routes(app: FastAPI, m, svc: CameraService) -> None:
         data, meta = await run(svc.jpeg, view, w, q, bool(overlay), None if hide is None else bool(hide))
         return Response(data, media_type="image/jpeg", headers={"Cache-Control": "no-store", "X-Frame-Seq": str(meta["seq"]),
                                                                   "X-Frame-T": f"{meta['t']:.3f}"})
+
+    @app.post("/api/camera/region")
+    async def cam_region(body: dict[str, Any]):
+        from .camera.board_read import read_region
+        r = await run(read_region, svc, body.get("rect"), float(body.get("px_per_mm") or 4.0),
+                      bool(body.get("hide", False)), int(body.get("frames") or 3), float(body.get("inset_mm") or 0.0))
+        r["image"] = "data:image/jpeg;base64," + base64.b64encode(r.pop("jpeg")).decode()
+        return r
+
+    @app.get("/api/camera/free-space")
+    async def cam_free_space(w: float, h: float, margin: float = 15.0, count: int = 3):
+        from .camera.board_read import free_space
+        return await run(free_space, svc, w, h, margin, max(1, min(int(count), 8)))
+
+    @app.get("/api/camera/occupancy")
+    async def cam_occupancy(cell: float = 10.0):
+        from .camera.board_read import occupancy
+        return await run(occupancy, svc, cell)
+
+    @app.post("/api/camera/overlap")
+    async def cam_overlap(body: dict[str, Any]):
+        from .camera.board_read import overlap
+        strokes = body.get("strokes")
+        if strokes is None and isinstance(body.get("drawing"), dict):
+            strokes = body["drawing"].get("strokes")
+        return await run(overlap, svc, strokes, float(body.get("margin_mm", 5.0)))
 
     @app.get("/api/camera/suggest-board")
     async def cam_suggest():

@@ -300,9 +300,37 @@ class DrawOptions:
     dry_run: bool = False
     preview_only: bool = False
     confirm: bool = False
+    allow_overlap: bool = False                              # draw over existing writing (camera check)
     show_travel: bool = True
     notes: list[str] = field(default_factory=list)          # informational, shown as "Note:"
     warnings: list[str] = field(default_factory=list)       # shown as "Warnings:"
+
+
+OVERLAP_PCT = 0.5            # share of a drawing's lines touching existing ink that counts as "overlaps"
+
+
+async def overlap_note(api: Api, d: Drawing) -> str | None:
+    """With a calibrated camera: a message if the drawing would run over what is already on the board."""
+    try:
+        info = await api.get("/api/camera")
+        if not (info.get("source") and info.get("calibrated")):
+            return None
+        ov = await api.post("/api/camera/overlap", {"drawing": d.to_json()})
+    except McpToolError:
+        return None
+    if ov["overlap_pct"] < OVERLAP_PCT:
+        return None
+    msg = f"The drawing runs over writing that is already on the board ({ov['overlap_pct']:.0f} % of its lines touch ink"
+    if ov["boxes"]:
+        msg += "; occupied: " + ", ".join(rect_text(b) for b in ov["boxes"][:3])
+    msg += ")."
+    sg = ov.get("suggestion")
+    if sg:
+        msg += (f" Empty place of the same size: {rect_text(sg['rect'])}, i.e. shift everything by "
+                f"dx={sg['dx']:+.0f} mm, dy={sg['dy']:+.0f} mm.")
+    else:
+        msg += " No empty place of that size was found: the board may need wiping."
+    return msg
 
 
 def _png_block(png: bytes) -> ImageContent:
@@ -332,6 +360,13 @@ async def plan_and_run(api: Api, ctx: Ctx, drawing: Drawing, opt: DrawOptions, *
     if not d.strokes:
         raise McpToolError(f"Nothing to draw: no stroke remains inside the usable area ({rect_text(rect)}).")
     d.name = opt.name
+    note = await overlap_note(api, d)
+    if note:
+        if opt.preview_only or opt.dry_run or opt.allow_overlap:
+            warnings.append(note)
+        else:
+            raise McpToolError(note + " Ask the user whether to draw over it (then call again with allow_overlap=true) "
+                               "or move the drawing there.", "overlap")
     body = {"drawing": d.to_json(), "dry_run": bool(opt.dry_run and not opt.preview_only), "name": opt.name}
     pv = await api.post("/api/preview", body)
     for w in pv.get("warnings", []):

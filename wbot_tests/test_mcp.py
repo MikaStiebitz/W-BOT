@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 EXPECTED_TOOLS = {"get_status", "get_board_info", "list_patterns", "preview_drawing", "draw_pattern",
                   "draw_strokes", "draw_text", "draw_shape", "draw_shapes", "draw_svg", "job_status", "pause_job",
                   "resume_job", "cancel_job", "emergency_stop", "pen_up", "move_to", "select_color",
-                  "camera_snapshot"}
+                  "camera_snapshot", "ask_on_board", "read_board_area", "find_free_space"}
 SQUARE = [[400, 300], [460, 300], [460, 360], [400, 360], [400, 300]]
 
 
@@ -98,6 +98,41 @@ async def test_camera_snapshot(plotter):
         assert not res.is_error and "image spans x" in text(res)
         im = Image.open(io.BytesIO(base64.b64decode(images(res)[0].data)))
         assert im.format == "JPEG" and im.width == 1280
+
+
+async def test_quiz_writes_task_and_reads_the_answer_box(plotter):
+    m, app = plotter
+    async with mcp_client(app) as c:
+        res = await c.call_tool("read_board_area", {})
+        assert res.is_error and "ask_on_board" in text(res)
+        app.state.camera.configure({"source": {"kind": "sim"}})
+        app.state.camera.frame(timeout=5.0)
+        app.state.camera.calibrate_from_markers()
+        free = await c.call_tool("find_free_space", {"width_mm": 300, "height_mm": 200})
+        assert not free.is_error and "empty" in text(free)
+        res = await c.call_tool("ask_on_board", {"question": "2+3=?", "text_height_mm": 25, "answer_width_mm": 200,
+                                                 "answer_height_mm": 80})
+        assert not res.is_error and "Answer box: x" in text(res) and "empty space" in text(res)
+        await wait_job(c)
+        box = (await c.call_tool("read_board_area", {})).content
+        assert "looks EMPTY" in box[0].text and "2+3=?" in box[0].text and box[1].mime_type == "image/jpeg"
+        ab = text(res).split("Answer box: x ")[1]
+        x0, x1 = (float(v) for v in ab.split(" mm")[0].split(".."))
+        y0, y1 = (float(v) for v in ab.split(", y ")[1].split(" mm")[0].split(".."))
+        mx, my = (x0 + x1) / 2, (y0 + y1) / 2
+        res = await c.call_tool("draw_strokes", {"strokes": [{"points": [[mx - 40, my - 20], [mx - 20, my + 20],
+                                                                         [mx, my - 20], [mx + 20, my + 20]]}]})
+        assert not res.is_error, text(res)
+        await wait_job(c)
+        app.state.camera.frame(timeout=5.0)
+        res = await c.call_tool("read_board_area", {})
+        assert not res.is_error and "something is written" in text(res), text(res)
+        over = await c.call_tool("draw_strokes", {"strokes": [{"points": [[x0 - 30, my], [x1 + 30, my]]}]})
+        assert over.is_error and "allow_overlap" in text(over) and "dx=" in text(over), text(over)
+        res = await c.call_tool("draw_strokes", {"strokes": [{"points": [[x0 - 30, my], [x1 + 30, my]]}],
+                                                 "allow_overlap": True, "dry_run": True})
+        assert not res.is_error and "runs over writing" in text(res)
+        await wait_job(c)
 
 
 async def test_tool_listing_resources_and_instructions(plotter):

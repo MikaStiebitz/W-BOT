@@ -2,6 +2,7 @@
 import math
 import time
 
+import cv2
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
@@ -405,3 +406,43 @@ def test_gondola_found_from_its_belts():
         assert r["ok"] and math.dist(r["pen"], pen) < 15, (pen, r)
     r = locate(cfg, g, cam.render((), None))                  # no gondola: nothing hangs on the belts
     assert not r["ok"]
+
+
+def _scribble(cam, img, pts_mm, px=4):
+    q = np.round(cam.project(np.asarray(pts_mm, float))).astype(np.int32)
+    cv2.polylines(img, [q], False, (40, 40, 40), px, cv2.LINE_AA)
+
+
+def test_answer_area_is_read_and_free_space_found():
+    from wbot.camera.board_read import free_space, occupancy, overlap, read_region
+    m, svc, cam = _guard_rig()
+    try:
+        img = cam.render((), None)
+        _scribble(cam, img, [(620, 330), (660, 380), (700, 330), (740, 380), (780, 330)])     # "handwriting"
+        _scribble(cam, img, [(150, 700), (450, 700), (450, 850)])                              # old content
+        svc.use_image(img)
+        svc.calibrate_from_markers()
+        r = read_region(svc, [580, 300, 820, 420], px_per_mm=4, frames=1, inset_mm=15)
+        assert r["ink_pct"] > 1 and r["jpeg"][:2] == b"\xff\xd8" and not r["blocked"]
+        x0, y0, x1, y1 = r["ink_bbox"]
+        assert abs(x0 - 620) < 6 and abs(x1 - 780) < 6 and abs(y0 - 330) < 6 and abs(y1 - 380) < 6
+        assert read_region(svc, [900, 300, 1100, 420], frames=1, inset_mm=15)["ink_pct"] < 0.2
+        places = free_space(svc, 250, 120, margin_mm=15)["places"]
+        assert places and places[0]["occupied_pct"] == 0
+        for p in places:
+            px0, py0, px1, py1 = p["rect"]
+            for bx0, by0, bx1, by1 in ((620, 330, 780, 380), (150, 700, 450, 850)):
+                assert px1 <= bx0 or px0 >= bx1 or py1 <= by0 or py0 >= by1, (p, (bx0, by0))
+        occ = occupancy(svc, 10)
+        assert occ["rows"] == 100 and occ["cols"] == 150 and len(occ["cells"]) == 100
+        assert occ["cells"][64][64] == "1" and occ["cells"][50][100] == "0"        # (645, 355) ink, (1005, 495) free
+        assert any(abs(b[0] - 620) < 8 and abs(b[2] - 780) < 8 for b in occ["boxes"])
+        clash = overlap(svc, [[[600, 355], [800, 355]]])
+        assert clash["overlap_pct"] > 1 and clash["boxes"] and clash["suggestion"]
+        sg = clash["suggestion"]
+        moved = overlap(svc, [[[600 + sg["dx"], 355 + sg["dy"]], [800 + sg["dx"], 355 + sg["dy"]]]])
+        assert moved["overlap_pct"] == 0
+        assert overlap(svc, [{"points": [[900, 200], [1100, 200]]}])["overlap_pct"] == 0
+    finally:
+        svc.shutdown()
+        m.shutdown()

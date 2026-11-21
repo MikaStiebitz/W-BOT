@@ -70,6 +70,7 @@ An MCP server lets an AI assistant preview and draw shapes, text and SVG through
 | Embedded | `wbot serve`, then add `http://127.0.0.1:8000/mcp` as a streamable-HTTP MCP server |
 | Standalone | `python -m wbot mcp --api http://127.0.0.1:8000` (stdio), `PYTHONPATH` = repo |
 | Tools | `get_status`, `preview_drawing`, `draw_pattern`, `draw_shape(s)`, `draw_text`, `draw_svg`, `camera_snapshot`, `pause/resume/cancel_job`, `emergency_stop`, … |
+| Whiteboard quiz | With a calibrated camera the assistant writes a task with an empty answer box, you answer by hand, it reads the answer with the camera (`board_quiz` prompt). Every AI drawing is also checked against writing already on the board (`GET /api/camera/occupancy`, `POST /api/camera/overlap`). |
 | **Cannot** | raw G-code, connect, set reference, change config, flash firmware |
 
 `config/wbot.yaml` → `mcp`: `allow_motion: false` is a kill switch (preview only), `require_confirm_real_hardware: true` asks first. Set `WBOT_MCP_TOKEN` before exposing `/mcp` on a network.

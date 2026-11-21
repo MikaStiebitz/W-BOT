@@ -33,6 +33,7 @@ from mcp_types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .drawing import Drawing
+from .mcp_quiz import register_quiz_tools
 from .mcp_shapes import ShapeError, ShapeSpec, build_shape, build_text
 from .mcp_tools import (Api, DrawOptions, McpToolError, board_info, board_text, check_enabled,
                         check_motion_allowed, job_text, load_ctx, patterns_text, plan_and_run,
@@ -60,6 +61,9 @@ start a second drawing while one is running (it is refused). pause_job / resume_
 and emergency_stop exist; after an emergency stop a human must unlock and re-reference.
 5. Colour changes cost time (the revolver turns): group things by colour.
 6. If a camera is set up, camera_snapshot shows what is really on the board (with the plan as overlay): look before drawing next to existing content, and after a drawing to check it.
+7. Quiz / tutoring: ask_on_board writes a task with an empty answer box; the user answers by hand and says so; read_board_area() then shows the box sharply so you can read and check the answer (prompt: board_quiz).
+
+EXISTING WRITING: with a camera, a drawing that would run over what is already on the board is refused with the occupied areas and an empty place nearby. Ask the user: draw over it (call again with allow_overlap=true) or move it (shift the coordinates by the suggested dx, dy). find_free_space finds room before you design.
 
 TIPS: one draw call = one job, so put a whole composition into one call (draw_strokes, draw_shapes). Close a \
 polygon by repeating its first point. Single-stroke font: text height is the cap height; below ~15 mm text gets \
@@ -107,9 +111,11 @@ def build_server(api: Api) -> MCPServer:
         return c
 
     async def draw(c, d: Drawing, name: str, dry_run: bool, preview_only: bool, confirm: bool,
-                   notes: list[str] | None = None, warnings: list[str] | None = None, show_travel: bool = True):
+                   notes: list[str] | None = None, warnings: list[str] | None = None, show_travel: bool = True,
+                   allow_overlap: bool = False):
         return await plan_and_run(api, c, d, DrawOptions(name=name, dry_run=dry_run, preview_only=preview_only,
                                                          confirm=confirm, show_travel=show_travel,
+                                                         allow_overlap=allow_overlap,
                                                          notes=notes or [], warnings=warnings or []))
 
     # ------------------------------------------------------------------ information
@@ -174,6 +180,8 @@ find free space or compare plan and reality. Never moves anything."""
         return [TextContent(type="text", text="\n".join(lines)),
                 ImageContent(type="image", data=base64.b64encode(jpg).decode(), mime_type="image/jpeg")]
 
+    register_quiz_tools(server, tool, _RO, _DRAW, api, ctx, draw)
+
     # ------------------------------------------------------------------ preview
     @tool(_RO)
     async def preview_drawing(strokes: list[StrokeIn] | None = None, pattern: str | None = None,
@@ -201,36 +209,36 @@ SVG have their own tools with preview_only=true.)"""
 
     @tool(_DRAW)
     async def draw_pattern(id: str, params: dict[str, Any] | None = None, dry_run: bool = False,
-                           preview_only: bool = False, confirm: bool = False) -> Any:
+                           preview_only: bool = False, confirm: bool = False, allow_overlap: bool = False) -> Any:
         """Draw a ready-made pattern (id and parameters from list_patterns), e.g. 'square-frame', 'circles', \
 'star', 'text'. Starts a background job and returns its id, an estimate and a PNG preview. preview_only=true only \
 renders; dry_run=true runs with the pen up; confirm=true only when the operator requires confirmation for real \
 hardware."""
         c = await ctx()
-        return await draw(c, _pattern(c, id, params), f"Pattern {id}", dry_run, preview_only, confirm)
+        return await draw(c, _pattern(c, id, params), f"Pattern {id}", dry_run, preview_only, confirm, allow_overlap=allow_overlap)
 
     @tool(_DRAW)
     async def draw_strokes(strokes: list[StrokeIn], name: str = "AI drawing", dry_run: bool = False,
-                           preview_only: bool = False, confirm: bool = False) -> Any:
+                           preview_only: bool = False, confirm: bool = False, allow_overlap: bool = False) -> Any:
         """Draw freely: a list of strokes, each {color: slot 1..3 or name, points: [[x, y], ...]} in board mm \
 (origin lower-left, y up). Points outside the usable area are clipped with a warning. Limits: see get_board_info. \
 Starts a background job (poll job_status) and returns a PNG preview. preview_only=true only renders; dry_run=true \
 runs with the pen up."""
         c = await ctx()
-        return await draw(c, strokes_from_input(strokes, c), name, dry_run, preview_only, confirm)
+        return await draw(c, strokes_from_input(strokes, c), name, dry_run, preview_only, confirm, allow_overlap=allow_overlap)
 
     @tool(_DRAW)
     async def draw_text(text: str, x: float, y: float, height_mm: float = 40.0, color: Color = 1,
                         align: Literal["left", "center", "right"] = "center",
                         valign: Literal["baseline", "center", "top"] = "center", line_spacing: float = 1.0,
-                        dry_run: bool = False, preview_only: bool = False, confirm: bool = False) -> Any:
+                        dry_run: bool = False, preview_only: bool = False, confirm: bool = False, allow_overlap: bool = False) -> Any:
         """Write text with a single-stroke (Hershey) font, e.g. to write HELLO in the middle of the board. (x, y) \
 is the anchor in board mm: `align` = horizontal reference (left/center/right edge of every line), `valign` = vertical \
 reference of the whole block (center = middle of the capitals, baseline, top). height_mm = capital height. Use \\n \
 for several lines. Umlauts work. Returns a PNG preview; text sticking out of the usable area is clipped (warning)."""
         c = await ctx()
         strokes, (w, h) = build_text(text, x, y, height_mm, resolve_color(color, c.cfg), align, valign, line_spacing)
-        return await draw(c, Drawing(strokes), "Text " + " ".join(text.split())[:20], dry_run, preview_only, confirm,
+        return await draw(c, Drawing(strokes), "Text " + " ".join(text.split())[:20], dry_run, preview_only, confirm, allow_overlap=allow_overlap,
                           notes=[f"text block is {w:.0f} x {h:.0f} mm"])
 
     @tool(_DRAW)
@@ -241,7 +249,7 @@ for several lines. Umlauts work. Returns a PNG preview; text sticking out of the
                          end_deg: float | None = None, sides: int | None = None, rotation_deg: float = 0.0,
                          fill: bool = False, hatch_spacing_mm: float = 3.0, hatch_angle_deg: float = 45.0,
                          color: Color = 1, dry_run: bool = False, preview_only: bool = False,
-                         confirm: bool = False) -> Any:
+                         confirm: bool = False, allow_overlap: bool = False) -> Any:
         """Draw ONE geometric shape (use draw_shapes for a composition in one job). Needed fields per kind: \
 line: points=[[x0,y0],[x1,y1]]; polyline: points (>=2); rect: x, y = lower-left corner, width, height (optional \
 rotation_deg about the centre); circle: x, y = centre, radius; ellipse: x, y, rx, ry (optional rotation_deg); \
@@ -253,11 +261,11 @@ radius, start_deg, end_deg (counter-clockwise from the +x axis). fill=true hatch
                          ry=ry, start_deg=start_deg, end_deg=end_deg, sides=sides, rotation_deg=rotation_deg,
                          fill=fill, hatch_spacing_mm=hatch_spacing_mm, hatch_angle_deg=hatch_angle_deg, color=color)
         d = Drawing(build_shape(spec, resolve_color(color, c.cfg), c.cfg.safe_rect()))
-        return await draw(c, d, f"Shape {kind}", dry_run, preview_only, confirm)
+        return await draw(c, d, f"Shape {kind}", dry_run, preview_only, confirm, allow_overlap=allow_overlap)
 
     @tool(_DRAW)
     async def draw_shapes(shapes: list[ShapeSpec], name: str = "AI shapes", dry_run: bool = False,
-                          preview_only: bool = False, confirm: bool = False) -> Any:
+                          preview_only: bool = False, confirm: bool = False, allow_overlap: bool = False) -> Any:
         """Draw several shapes as ONE job (e.g. a house = rect + polygon roof + door). Each shape has the fields \
 of draw_shape (kind, points, x, y, width, height, radius, rx, ry, start_deg, end_deg, sides, rotation_deg, fill, \
 hatch_spacing_mm, hatch_angle_deg, color). Returns a PNG preview."""
@@ -270,12 +278,12 @@ hatch_spacing_mm, hatch_angle_deg, color). Returns a PNG preview."""
                 strokes += build_shape(s, resolve_color(s.color, c.cfg), c.cfg.safe_rect())
             except ShapeError as exc:
                 raise McpToolError(f"Shape {i} ({s.kind}): {exc}") from None
-        return await draw(c, Drawing(strokes), name, dry_run, preview_only, confirm)
+        return await draw(c, Drawing(strokes), name, dry_run, preview_only, confirm, allow_overlap=allow_overlap)
 
     @tool(_DRAW)
     async def draw_svg(svg_text: str, fit: bool = True, margin_mm: float = 10.0, x: float | None = None,
                        y: float | None = None, name: str = "AI svg", dry_run: bool = False,
-                       preview_only: bool = False, confirm: bool = False) -> Any:
+                       preview_only: bool = False, confirm: bool = False, allow_overlap: bool = False) -> Any:
         """Draw an SVG document given as text. Only outlines are drawn (paths, lines, rects, circles, polygons; \
 no text/images/fills; the nearest pen colour is chosen per stroke colour). fit=true scales it to the usable area \
 (minus margin_mm); fit=false keeps its real size (SVG width/height in mm) and puts its lower-left corner at (x, y) \
@@ -294,7 +302,7 @@ no text/images/fills; the nearest pen colour is chosen per stroke colour). fit=t
         else:
             b = d.bounds()
             d = d.transformed(dx=(rect[0] if x is None else x) - b[0], dy=(rect[1] if y is None else y) - b[1])
-        return await draw(c, d, name, dry_run, preview_only, confirm, warnings=imp.warnings)
+        return await draw(c, d, name, dry_run, preview_only, confirm, allow_overlap=allow_overlap, warnings=imp.warnings)
 
     # ------------------------------------------------------------------ job control
     async def _running_job() -> dict | None:
