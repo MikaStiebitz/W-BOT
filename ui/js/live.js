@@ -1,7 +1,7 @@
 // Live draw: draw on the board view and the plotter follows, with a lag.
 // Strokes are queued; whenever the machine is free, everything queued so far goes out as one small job
 // (stroke order kept, no parking in between). A speed slider tries to keep up.
-import { h } from './util.js';
+import { h, debounce, lsGet, lsSet } from './util.js';
 import { icon } from './icons.js';
 import { store } from './store.js';
 import { api } from './api.js';
@@ -21,9 +21,17 @@ export const live = {
   current: null,
 };
 let sending = false, retryAt = 0, retryTimer = null, onInk = () => {};
+
+// the live session (mode, speed, strokes) survives a page reload
+const saved = lsGet('wbot-live', null);
+if (saved) {
+  live.speed = saved.speed ?? live.speed; live.on = !!saved.on;
+  live.strokes = (saved.strokes ?? []).filter((t) => Array.isArray(t.pts) && t.pts.length).map((t) => ({ pts: t.pts, color: t.color ?? 0, state: t.state === 'sent' ? 'sent' : 'queued' }));
+}
+const saveLive = debounce(() => lsSet('wbot-live', { on: live.on, speed: live.speed, strokes: live.strokes.slice(-300).map(({ pts, color, state }) => ({ pts, color, state })) }), 400);
 export const isLiveJob = (job) => job?.name === NAME;
 export function onLiveInk(fn) { onInk = fn; }
-const touchInk = () => { store.touch('live'); onInk(); };
+const touchInk = () => { store.touch('live'); onInk(); saveLive(); };
 
 function safeRect() {
   const cfg = store.get('config'), sr = store.get('state')?.limits?.safe_rect;
@@ -70,7 +78,7 @@ live.end = () => {
   touchInk(); pump();
 };
 live.queued = () => live.strokes.filter((s) => s.state === 'queued').length;
-live.setOn = (v) => { live.on = !!v; if (!v) live.current = null; store.touch('live'); if (v) pump(); };
+live.setOn = (v) => { live.on = !!v; if (!v) live.current = null; store.touch('live'); saveLive(); if (v) pump(); };
 live.clear = () => { live.strokes = live.strokes.filter((s) => s === live.current); touchInk(); };
 live.stop = async () => {
   live.strokes = live.strokes.filter((s) => s.state === 'sent' || s === live.current);
@@ -113,7 +121,7 @@ export function mountLiveBar(wrap) {
   const hint = h('div', { class: 'live-hint' });
   const penRow = h('div', { class: 'pen-pick', role: 'group', 'aria-label': 'Pen' });
   const spLbl = h('span', { class: 'mono-val', style: { minWidth: '34px' } }, `${live.speed}×`);
-  const sp = slider({ min: 0.5, max: 4, step: 0.5, value: live.speed, label: 'Plotter speed', onInput: (v) => { live.speed = v; spLbl.textContent = `${v}×`; } });
+  const sp = slider({ min: 0.5, max: 4, step: 0.5, value: live.speed, label: 'Plotter speed', onInput: (v) => { live.speed = v; spLbl.textContent = `${v}×`; saveLive(); } });
   sp.input.style.cssText = 'width:110px;min-width:80px';
   const stopBtn = h('button', { class: 'btn sm danger', type: 'button', title: 'Cancel the running job and drop everything queued', onClick: () => live.stop() }, icon('stop'), 'Stop');
   const clrBtn = h('button', { class: 'btn sm', type: 'button', title: 'Remove the drawn strokes from the view', onClick: () => live.clear() }, icon('trash'), 'Clear');

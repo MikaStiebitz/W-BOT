@@ -48,7 +48,7 @@ export function mountBoard(root) {
   const menuBtn = h('button', { class: 'btn sm', type: 'button', 'aria-expanded': 'false', title: 'View options',
     onClick: () => { menu.hidden = !menu.hidden; menuBtn.setAttribute('aria-expanded', String(!menu.hidden)); } }, icon('gear'), 'View');
   document.addEventListener('pointerdown', (e) => { if (!menu.hidden && !menu.contains(e.target) && !menuBtn.contains(e.target)) { menu.hidden = true; menuBtn.setAttribute('aria-expanded', 'false'); } });
-  const liveBtn = h('button', { class: 'btn sm', type: 'button', 'aria-pressed': 'false', title: 'Draw on the board and let the plotter follow',
+  const liveBtn = h('button', { class: 'btn sm', type: 'button', 'aria-pressed': String(live.on), title: 'Draw on the board and let the plotter follow',
     onClick: () => { live.setOn(!live.on); liveBtn.setAttribute('aria-pressed', String(live.on)); store.set({ target: null }); invalidate(); } }, icon('pen'), 'Live draw');
   const bar = h('div', { class: 'board-bar' },
     vbtn('All', 'Show the whole machine including the motors', () => fit('all')),

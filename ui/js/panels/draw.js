@@ -7,6 +7,7 @@ import { run, gate, toast, notice, clearNotice, confirmDialog } from '../ui.js';
 import { numField, selectField, toggle, slider, segmented, swatch } from '../widgets.js';
 import { caps } from '../caps.js';
 import { isLiveJob } from '../live.js';
+import { kvGet, kvSet, kvDel } from '../persist.js';
 
 const JOB_LABEL = { planning: 'Planning …', running: 'Drawing', paused: 'Paused', done: 'Done', cancelled: 'Cancelled', error: 'Error' };
 const DEFAULT_LAYOUT = { scale: 1, rotate: 0, dx: 0, dy: 0, fit: true };
@@ -20,12 +21,12 @@ export function mountDraw(root) {
   const sect = (title, ...kids) => h('div', { class: 'sect' }, title ? h('div', { class: 'sect-h' }, h('h2', null, title)) : null, ...kids);
   const note = () => h('div', { class: 'gate-note', role: 'status' });
 
-  const layout = { ...DEFAULT_LAYOUT };
+  const layout = { ...DEFAULT_LAYOUT, ...lsGet('wbot-layout', {}) };          // size, rotation and shift survive a reload
   const opt = { mode: 'auto', detail: 50, invert: false, colors: false, shade: false, ...lsGet('wbot-trace', {}) };
   let source = { kind: 'none' };                // {kind:'image', file, name, drawing, info} | {kind:'pattern'}
   let selected = lsGet('wbot-pattern', null);
-  const values = {};
-  let speed = 1, pvToken = 0, trToken = 0, lastJobState = null;
+  const values = lsGet('wbot-values', {});                                      // sample parameters per sample
+  let speed = lsGet('wbot-speed', 1), pvToken = 0, trToken = 0, lastJobState = null, restoreSample = false, persistedFile = null, restoring = true;
 
   /* ---------- 1. Drop zone ---------- */
   const fileIn = h('input', { type: 'file', accept: ACCEPT, hidden: true, 'aria-label': 'Choose an image' });
@@ -123,13 +124,13 @@ export function mountDraw(root) {
   }
 
   /* ---------- 4. Size & position ---------- */
-  const scaleSl = slider({ min: 10, max: 300, step: 5, value: 100, label: 'Size', onInput: (v) => { layout.scale = v / 100; scaleLbl.textContent = `${v} %`; schedulePreview(); } });
-  const scaleLbl = h('span', { class: 'mono-val', style: { minWidth: '52px', textAlign: 'right' } }, '100 %');
-  const rotBtn = h('button', { class: 'btn sm', type: 'button', title: 'Rotate by 90°' }, icon('refresh'), 'Rotate');
+  const scaleSl = slider({ min: 10, max: 300, step: 5, value: Math.round(layout.scale * 100), label: 'Size', onInput: (v) => { layout.scale = v / 100; scaleLbl.textContent = `${v} %`; schedulePreview(); } });
+  const scaleLbl = h('span', { class: 'mono-val', style: { minWidth: '52px', textAlign: 'right' } }, `${Math.round(layout.scale * 100)} %`);
+  const rotBtn = h('button', { class: 'btn sm', type: 'button', title: 'Rotate by 90°' }, icon('refresh'), layout.rotate ? `Rotate (${layout.rotate}°)` : 'Rotate');
   rotBtn.addEventListener('click', () => { layout.rotate = (layout.rotate + 90) % 360; rotBtn.lastChild.textContent = layout.rotate ? `Rotate (${layout.rotate}°)` : 'Rotate'; schedulePreview(true); });
-  const dx = numField({ label: 'Shift X', unit: 'mm', step: 1, value: 0, onChange: (v) => { layout.dx = v ?? 0; schedulePreview(true); } });
-  const dy = numField({ label: 'Shift Y', unit: 'mm', step: 1, value: 0, onChange: (v) => { layout.dy = v ?? 0; schedulePreview(true); } });
-  const fitT = toggle({ label: 'Fit to the drawing area', checked: true, onChange: (v) => { layout.fit = v; schedulePreview(true); } });
+  const dx = numField({ label: 'Shift X', unit: 'mm', step: 1, value: layout.dx, onChange: (v) => { layout.dx = v ?? 0; schedulePreview(true); } });
+  const dy = numField({ label: 'Shift Y', unit: 'mm', step: 1, value: layout.dy, onChange: (v) => { layout.dy = v ?? 0; schedulePreview(true); } });
+  const fitT = toggle({ label: 'Fit to the drawing area', checked: layout.fit, onChange: (v) => { layout.fit = v; schedulePreview(true); } });
   const resetBtn = h('button', { class: 'btn sm', type: 'button', onClick: () => {
     Object.assign(layout, DEFAULT_LAYOUT); fitT.set(true); scaleSl.input.value = '100'; scaleLbl.textContent = '100 %';
     dx.input.value = '0'; dy.input.value = '0'; rotBtn.lastChild.textContent = 'Rotate'; schedulePreview(true);
@@ -159,7 +160,10 @@ export function mountDraw(root) {
     } catch { /* notice came from api.js */ }
   }
   const debouncedPreview = debounce(doPreview, 300);
-  function schedulePreview(now = false) { if (now) { debouncedPreview.cancel(); doPreview(); } else debouncedPreview(); }
+  function schedulePreview(now = false) {
+    lsSet('wbot-layout', layout); lsSet('wbot-values', values);               // saved with every change
+    if (now) { debouncedPreview.cancel(); doPreview(); } else debouncedPreview();
+  }
 
   function paintPreview() {
     const pv = store.get('preview');
@@ -175,7 +179,15 @@ export function mountDraw(root) {
   }
 
   /* ---------- Loading ---------- */
+  function persistSource() {                      // the image itself goes to IndexedDB, everything small to localStorage
+    if (restoring) return;                         // the first paint must not overwrite what is about to be restored
+    lsSet('wbot-source', source.kind);
+    if (source.kind === 'image') { if (persistedFile !== source.file) { persistedFile = source.file; kvSet('image', source.file); } }
+    else { persistedFile = null; kvDel('image'); }
+  }
+
   function paintSource() {
+    persistSource();
     const img = source.kind === 'image';
     fileBar.hidden = !img;
     optBox.hidden = !(img && !source.isSvg);
@@ -197,13 +209,13 @@ export function mountDraw(root) {
     c.drawImage(b, (64 - b.width * k) / 2, (64 - b.height * k) / 2, b.width * k, b.height * k);
   }
 
-  async function loadFile(file) {
+  async function loadFile(file, { restore = false } = {}) {
     if (!file) return;
     const okType = file.type.startsWith('image/') || IMAGE_RE.test(file.name || '');
     if (!okType) { notice('upload', `“${file.name}” is not an image. Use PNG, JPEG, WebP, BMP, GIF or SVG.`, 'error'); return; }
     if (file.size > 30e6) { notice('upload', `“${file.name}” is ${(file.size / 1e6).toFixed(0)} MB. The maximum is 30 MB.`, 'error'); return; }
     clearNotice('upload');
-    store.set({ tab: 'draw' });
+    if (!restore) store.set({ tab: 'draw' });
     const isSvg = /svg/i.test(file.type) || /\.svg$/i.test(file.name || '');
     source = { kind: 'image', file, name: file.name || 'image', isSvg, drawing: null, info: null, bitmap: null };
     if (!isSvg) createImageBitmap(file).then((b) => { if (source.file === file) { source.bitmap = b; renderThumb(); } }).catch(() => {});
@@ -242,8 +254,8 @@ export function mountDraw(root) {
   const resumeBtn = h('button', { class: 'btn', type: 'button' }, icon('play'), 'Resume');
   const cancelBtn = h('button', { class: 'btn danger', type: 'button' }, icon('stop'), 'Cancel');
   const startNote = note();
-  const speedSl = slider({ min: 25, max: 150, step: 5, value: 100, label: 'Speed', onInput: (v) => { speed = v / 100; speedLbl.textContent = `${v} %`; } });
-  const speedLbl = h('span', { class: 'mono-val', style: { minWidth: '48px', textAlign: 'right' } }, '100 %');
+  const speedSl = slider({ min: 25, max: 150, step: 5, value: Math.round(speed * 100), label: 'Speed', onInput: (v) => { speed = v / 100; speedLbl.textContent = `${v} %`; lsSet('wbot-speed', speed); } });
+  const speedLbl = h('span', { class: 'mono-val', style: { minWidth: '48px', textAlign: 'right' } }, `${Math.round(speed * 100)} %`);
   const speedRow = h('details', { class: 'more' }, h('summary', null, 'Speed'), h('div', { class: 'row-s more-body' }, speedSl.input, speedLbl));
 
   async function start(dry) {
@@ -290,7 +302,10 @@ export function mountDraw(root) {
     sect(null, summary, warns, sizeBox),
     sect(null, drawBtn, dryBtn, h('div', { class: 'row' }, pauseBtn, resumeBtn, cancelBtn), startNote, jobState, progress, jobInfo, jobMsg, speedRow));
 
-  store.on('patterns', () => { renderList(); renderParams(); }, { immediate: true });
+  store.on('patterns', () => {
+    renderList(); renderParams();
+    if (restoreSample && store.get('patterns').length) { restoreSample = false; restoring = false; source = { kind: 'pattern' }; paintSource(); renderList(); schedulePreview(true); }
+  }, { immediate: true });
   store.on(['job', 'state', 'preview'], paintJob, { immediate: true });
   store.on('preview', paintPreview, { immediate: true });
   store.on(['config', 'selectedPen'], paintPens, { immediate: true });
@@ -302,6 +317,17 @@ export function mountDraw(root) {
   }, { immediate: true });
   store.on('selectedPen', () => { if (!opt.colors && source.kind === 'image' && !source.isSvg) debouncedTrace(); });
   paintSource();
+
+  /* ---------- Restore the drawing after a reload ---------- */
+  (async () => {
+    const kind = lsGet('wbot-source', 'none');
+    if (kind === 'image') {
+      const f = await kvGet('image');
+      if (f) { persistedFile = f; await loadFile(f, { restore: true }); }
+      restoring = false; persistSource();
+    } else if (kind === 'pattern') { restoreSample = true; if (store.get('patterns').length) store.touch('patterns'); }
+    else restoring = false;
+  })();
 
   /* ---------- Window-wide drop and paste ---------- */
   const over = h('div', { class: 'drop-overlay', hidden: true }, h('div', null, icon('upload'), h('b', null, 'Drop to import')));
