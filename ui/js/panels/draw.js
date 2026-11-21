@@ -21,7 +21,7 @@ export function mountDraw(root) {
   const note = () => h('div', { class: 'gate-note', role: 'status' });
 
   const layout = { ...DEFAULT_LAYOUT };
-  const opt = { mode: 'auto', detail: 50, invert: false, colors: false, ...lsGet('wbot-trace', {}) };
+  const opt = { mode: 'auto', detail: 50, invert: false, colors: false, shade: false, ...lsGet('wbot-trace', {}) };
   let source = { kind: 'none' };                // {kind:'image', file, name, drawing, info} | {kind:'pattern'}
   let selected = lsGet('wbot-pattern', null);
   const values = {};
@@ -49,27 +49,34 @@ export function mountDraw(root) {
 
   /* ---------- 2. Trace options (images only) ---------- */
   const modeSeg = segmented({ label: 'Drawing style', fill: true, value: opt.mode, options: [
-    { value: 'auto', label: 'Auto', title: 'Picks lines or outline from the image' },
+    { value: 'auto', label: 'Auto', title: 'Picks the best style for the image' },
+    { value: 'photo', label: 'Photo', title: 'Outlines and inner lines of objects (photos, renders)' },
     { value: 'lines', label: 'Lines', title: 'Centre lines of thin strokes (line art, handwriting)' },
-    { value: 'outline', label: 'Outline', title: 'Edges of dark areas (logos, photos)' },
+    { value: 'outline', label: 'Outline', title: 'Edges of dark areas (logos, silhouettes)' },
     { value: 'fill', label: 'Fill', title: 'Hatching with the pen width (solid areas, slow)' }],
   onChange: (v) => { opt.mode = v; optsChanged(); } });
   const detailSl = slider({ min: 0, max: 100, step: 5, value: opt.detail, label: 'Detail', onInput: (v) => { opt.detail = v; detailLbl.textContent = String(v); }, onChange: () => optsChanged() });
   const detailLbl = h('span', { class: 'mono-val', style: { minWidth: '30px', textAlign: 'right' } }, String(opt.detail));
   const colorsT = toggle({ label: 'Use all pen colours', checked: opt.colors, onChange: (v) => { opt.colors = v; optsChanged(); } });
   const invertT = toggle({ label: 'Invert (light on dark)', checked: opt.invert, onChange: (v) => { opt.invert = v; optsChanged(); } });
+  const shadeT = toggle({ label: 'Shade dark areas', checked: opt.shade, onChange: (v) => { opt.shade = v; optsChanged(); } });
   const penRow = h('div', { class: 'pen-pick', role: 'group', 'aria-label': 'Pen' });
   const penLbl = h('span', { class: 'field-label' }, 'Pen');
   const optBox = h('div', { class: 'stack', hidden: true },
     modeSeg.el,
     h('div', { class: 'row-s' }, h('span', { class: 'field-label', style: { flex: 'none', width: '52px' } }, 'Detail'), detailSl.input, detailLbl),
-    colorsT.el, h('div', { class: 'row-s' }, penLbl, penRow), invertT.el);
+    shadeT.el, colorsT.el, h('div', { class: 'row-s' }, penLbl, penRow), invertT.el);
 
   function paintPens() {
     const pens = store.get('config')?.colors ?? [], cur = store.get('selectedPen') ?? 0;
     penRow.replaceChildren(...pens.map((p, i) => h('button', { type: 'button', class: 'pen-dot', 'aria-pressed': String(i === cur), title: `Pen ${i + 1}: ${p.name}`,
       'aria-label': `Pen ${i + 1}: ${p.name}`, style: { '--c': p.hex }, onClick: () => { store.set({ selectedPen: i }); lsSet('wbot-pen', i); } })));
-    penRow.hidden = penLbl.hidden = opt.colors;
+    // photo style draws edges with one pen: colour split and invert do not apply, shading does
+    const photo = opt.mode === 'photo' || (opt.mode === 'auto' && !opt.colors && source.info?.mode === 'photo');
+    shadeT.el.hidden = !photo;
+    colorsT.el.hidden = opt.mode === 'photo';
+    invertT.el.hidden = photo;
+    penRow.hidden = penLbl.hidden = opt.colors && opt.mode !== 'photo';
   }
 
   /* ---------- 3. Samples ---------- */
@@ -210,7 +217,7 @@ export function mountDraw(root) {
     const my = ++trToken, file = source.file;
     busyChip.hidden = false;
     try {
-      const r = await api.importFile(file, { mode: opt.mode, detail: opt.detail, invert: opt.invert, use_pen_colors: opt.colors, pen: store.get('selectedPen') ?? 0 });
+      const r = await api.importFile(file, { mode: opt.mode, detail: opt.detail, invert: opt.invert, use_pen_colors: opt.colors, shade: opt.shade, pen: store.get('selectedPen') ?? 0 });
       if (my !== trToken || source.file !== file) return;
       source.drawing = r.drawing; source.info = r.info ?? null; source.warnings = r.warnings ?? [];
       paintSource();
