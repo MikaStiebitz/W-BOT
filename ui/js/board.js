@@ -8,6 +8,7 @@ import { strokesOf } from './drawing.js';
 import { drawCalibration } from './board-calib.js';
 import { mountBoardCam } from './board-cam.js';
 import { live, mountLiveBar, onLiveInk } from './live.js';
+import { api } from './api.js';
 
 const RL = 42, RB = 24, PAD = 12;                       // Lineal links / unten, Rand
 const NICE = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
@@ -41,10 +42,18 @@ export function mountBoard(root) {
     return b;
   };
   const vbtn = (label, title, fn, ic) => h('button', { class: 'btn sm' + (ic ? ' icon-only' : ''), type: 'button', title, 'aria-label': title, onClick: fn }, ic ? icon(ic) : label);
+  const writingBtn = h('button', { class: 'btn sm', type: 'button', 'aria-pressed': 'false', title: 'Scan the board with the camera and mark what is already written (needs a calibrated camera)' }, 'Show writing');
+  writingBtn.addEventListener('click', async () => {
+    if (store.get('occupancy')) { store.set({ occupancy: null }); writingBtn.setAttribute('aria-pressed', 'false'); return; }
+    writingBtn.disabled = true; writingBtn.textContent = 'Scanning …';
+    try { store.set({ occupancy: await api.occupancy(10) }); writingBtn.setAttribute('aria-pressed', 'true'); }
+    catch { writingBtn.setAttribute('aria-pressed', 'false'); }        // the notice came from api.js
+    finally { writingBtn.disabled = false; writingBtn.textContent = store.get('occupancy') ? 'Hide writing' : 'Show writing'; }
+  });
   const clearBtn = h('button', { class: 'btn sm', type: 'button', title: 'Clear the drawn trace from the view', onClick: () => { store.get('trace').length = 0; store.touch('trace'); } }, icon('trash'), 'Clear trace');
   const menu = h('div', { class: 'board-menu', hidden: true, role: 'group', 'aria-label': 'View options' },
     tog('grid', 'Grid', 'Show or hide the grid'), tog('preview', 'Preview', 'Show or hide the preview'),
-    tog('travel', 'Travel', 'Show travel moves (pen up)'), tog('firmware', 'Firmware', 'Position the firmware believes'), clearBtn);
+    tog('travel', 'Travel', 'Show travel moves (pen up)'), tog('firmware', 'Firmware', 'Position the firmware believes'), writingBtn, clearBtn);
   const menuBtn = h('button', { class: 'btn sm', type: 'button', 'aria-expanded': 'false', title: 'View options',
     onClick: () => { menu.hidden = !menu.hidden; menuBtn.setAttribute('aria-expanded', String(!menu.hidden)); } }, icon('gear'), 'View');
   document.addEventListener('pointerdown', (e) => { if (!menu.hidden && !menu.contains(e.target) && !menuBtn.contains(e.target)) { menu.hidden = true; menuBtn.setAttribute('aria-expanded', 'false'); } });
@@ -123,7 +132,7 @@ export function mountBoard(root) {
     if (!cfg) return;
     ctx.save();
     ctx.beginPath(); ctx.rect(RL, 0, W - RL, H - RB); ctx.clip();
-    drawBoard(cfg); cam.draw(ctx, w2s, view.scale); ga = cam.inkAlpha(); drawPreview(cfg); drawTrace(cfg); drawLive(cfg); ga = 1; drawMachine(cfg); drawCamTrack(); drawCalibration(ctx, w2s, th, viewing('kalib') ? store.get('calib') : null, view, W, RL); drawTarget(); drawHover();
+    drawBoard(cfg); cam.draw(ctx, w2s, view.scale); ga = cam.inkAlpha(); drawOccupancy(); drawPreview(cfg); drawTrace(cfg); drawLive(cfg); ga = 1; drawMachine(cfg); drawCamTrack(); drawCalibration(ctx, w2s, th, viewing('kalib') ? store.get('calib') : null, view, W, RL); drawTarget(); drawHover();
     ctx.restore();
     drawRulers();
   }
@@ -156,6 +165,28 @@ export function mountBoard(root) {
 
   /** On-screen width of a pen's line: the real width in mm, but never thinner than `min` px. */
   function penPx(cfg, slot, min) { return Math.max(min, (cfg?.colors?.[slot]?.width_mm ?? 0) * view.scale); }
+
+  /** What the camera sees written on the board: hatched red cells (cells[row][col], row 0 = top edge). */
+  function drawOccupancy() {
+    const oc = store.get('occupancy');
+    if (!oc?.cells) return;
+    const [x0, , , y1] = oc.rect, cm = oc.cell_mm, k = view.scale;
+    ctx.fillStyle = 'rgba(215, 60, 60, 0.30)'; ctx.strokeStyle = 'rgba(215, 60, 60, 0.75)'; ctx.lineWidth = 1;
+    oc.cells.forEach((row, r) => {
+      let c = 0;
+      while (c < row.length) {
+        if (row[c] !== '1') { c++; continue; }
+        let e = c; while (e < row.length && row[e] === '1') e++;
+        const [sx, sy] = w2s(x0 + c * cm, y1 - r * cm);
+        ctx.fillRect(sx, sy, (e - c) * cm * k, cm * k);
+        c = e;
+      }
+    });
+    for (const [bx0, by0, bx1, by1] of oc.boxes ?? []) {                       // outline of each piece of writing
+      const [sx, sy] = w2s(bx0, by1);
+      ctx.strokeRect(sx, sy, (bx1 - bx0) * k, (by1 - by0) * k);
+    }
+  }
 
   function drawPreview(cfg) {
     const pv = store.get('preview');
@@ -401,7 +432,7 @@ export function mountBoard(root) {
     } else simChip.hidden = true;
   }
 
-  store.on(['state', 'config', 'preview', 'trace', 'target', 'calib', 'tab', 'camTrack'], () => { updateNotes(); updateReadout(); invalidate(); });
+  store.on(['state', 'config', 'preview', 'trace', 'target', 'calib', 'tab', 'camTrack', 'occupancy'], () => { updateNotes(); updateReadout(); invalidate(); });
   store.on('config', () => { if (view.mode !== 'user') fit(view.mode); });
   readTheme(); resize(); updateNotes();
 }

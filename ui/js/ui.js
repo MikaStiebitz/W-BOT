@@ -53,6 +53,20 @@ export function confirmDialog({ title, text, ok = 'OK', cancel = 'Cancel', dange
   });
 }
 
+/** Dialog with several answers. choices: [{value, label, kind?}] -> the chosen value, or 'cancel' on Esc / click outside. */
+export function choiceDialog({ title, text, choices }) {
+  return new Promise((resolve) => {
+    const dlg = h('dialog', null,
+      h('h2', null, title),
+      h('p', { class: 'muted' }, text),
+      h('div', { class: 'actions' },
+        ...choices.map((c) => h('button', { class: 'btn ' + (c.kind ?? ''), type: 'button', onClick: () => dlg.close(c.value) }, c.label))));
+    dlg.addEventListener('close', () => { resolve(dlg.returnValue || 'cancel'); dlg.remove(); });
+    document.body.append(dlg);
+    if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+  });
+}
+
 /* ---------- Disabling with a reason ---------- */
 function sync(el) {
   const dis = !!el._reason || !!el._busy;

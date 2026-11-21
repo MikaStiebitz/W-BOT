@@ -117,6 +117,8 @@ export const api = {
   cameraMarkers: () => request('POST', '/camera/calibrate/markers'),
   cameraUncalibrate: () => request('DELETE', '/camera/calibrate'),
   gondolaLocate: (apply = false, o) => request('POST', '/camera/gondola/locate', { apply }, o).then(applyState),
+  occupancy: (cell = 10, o) => get(`/camera/occupancy?cell=${cell}`, o),
+  overlap: (drawing, o) => request('POST', '/camera/overlap', { drawing }, o),
   autoSetup: () => request('POST', '/camera/auto-setup'),
   cameraMotors: () => get('/camera/motors/suggest'),
   cameraAnchors: (body) => request('POST', '/camera/anchors', body),

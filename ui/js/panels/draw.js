@@ -3,7 +3,7 @@ import { h, fmt, fmtDur, debounce, lsGet, lsSet } from '../util.js';
 import { icon } from '../icons.js';
 import { store } from '../store.js';
 import { api } from '../api.js';
-import { run, gate, toast, notice, clearNotice, confirmDialog } from '../ui.js';
+import { run, gate, toast, notice, clearNotice, confirmDialog, choiceDialog } from '../ui.js';
 import { numField, selectField, toggle, slider, segmented, swatch } from '../widgets.js';
 import { caps } from '../caps.js';
 import { isLiveJob } from '../live.js';
@@ -261,11 +261,32 @@ export function mountDraw(root) {
   const speedLbl = h('span', { class: 'mono-val', style: { minWidth: '48px', textAlign: 'right' } }, `${Math.round(speed * 100)} %`);
   const speedRow = h('details', { class: 'more' }, h('summary', null, 'Speed'), h('div', { class: 'row-s more-body' }, speedSl.input, speedLbl));
 
+  /** With a calibrated camera: is something already written where this will be drawn? true = go on. */
+  async function checkWriting() {
+    const pv = store.get('preview');
+    if (!store.get('camera')?.calibrated || !pv?.drawing) return true;
+    let r;
+    try { r = await api.overlap(pv.drawing, { quiet: true }); } catch { return true; }          // no camera view: just draw
+    if ((r?.overlap_pct ?? 0) < 0.5) return true;
+    const sug = r.suggestion, pct = r.overlap_pct < 10 ? r.overlap_pct.toFixed(1) : Math.round(r.overlap_pct);
+    const choice = await choiceDialog({ title: 'Something is already written here',
+      text: `This drawing runs over writing on the board (${pct} % of its length).${sug ? ' A free spot is nearby.' : ' No free spot of this size was found.'}`,
+      choices: [{ value: 'cancel', label: 'Cancel' }, ...(sug ? [{ value: 'move', label: 'Move to the free spot', kind: 'primary' }] : []), { value: 'draw', label: 'Draw over it', kind: sug ? '' : 'primary' }] });
+    if (choice === 'draw') return true;
+    if (choice === 'move' && sug) {
+      layout.dx += sug.dx; layout.dy += sug.dy; dx.set(Math.round(layout.dx * 10) / 10); dy.set(Math.round(layout.dy * 10) / 10);
+      sizeBox.open = true; schedulePreview(true);
+      notice('writing', 'Moved to a free spot. Check the preview, then press Draw.', 'info');
+    }
+    return false;
+  }
+
   async function start(dry) {
     if (!dry && ['serial', 'wifi'].includes(store.get('state')?.connection?.transport)) {
       const ok = await confirmDialog({ title: 'Start drawing?', text: 'The real machine will move and draw. Is the gondola free and the board clear? The space bar stops everything at any time.', ok: 'Start drawing' });
       if (!ok) return;
     }
+    if (!dry && !(await checkWriting())) return;
     const job = await api.startJob({ ...body(), dry_run: dry, speed_scale: speed, name: source.kind === 'image' ? source.name : undefined });
     store.set({ job });
   }
