@@ -4,16 +4,17 @@ Pipeline: decode -> downscale -> split into pen layers (one dark layer, or one l
 configured pen colour) -> trace each layer -> polylines in board millimetres.
 
 Tracing modes:
+    photo    outlines and inner edges of objects from colour/brightness changes (photos, renders)
     lines    centre lines of dark strokes (line art, handwriting, logos)
-    outline  contours of dark regions (silhouettes, photos)
+    outline  contours of dark regions (silhouettes, logos)
     fill     horizontal hatching with the pen's line width (solid areas)
-    auto     lines for thin strokes, outline for everything else
+    auto     photo for photos and renders; for two-tone images lines for thin strokes, else outline
 """
 from __future__ import annotations
 
 import io
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -22,7 +23,7 @@ from .drawing import Drawing, Stroke
 
 MAX_BYTES = 30_000_000
 MAX_STROKES = 20_000
-MODES = ("auto", "lines", "outline", "fill")
+MODES = ("auto", "photo", "lines", "outline", "fill")
 
 
 class ImageError(ValueError):
@@ -37,6 +38,7 @@ class TraceOptions:
     use_pen_colors: bool = False     # one layer per pen colour instead of a single dark layer
     pen: int = 0                     # pen slot for the single-layer case
     threshold: int | None = None     # 0..255 darkness cut-off, None = automatic
+    shade: bool = False              # photo mode: hatch dark areas
     fit_rect: tuple[float, float, float, float] | None = None
     pen_widths_mm: list[float] = field(default_factory=lambda: [2.0, 2.0, 2.0])
 
@@ -285,8 +287,14 @@ def trace_image(data: bytes | np.ndarray, cfg: Config, opts: TraceOptions | None
     h0, w0 = rgb.shape[:2]
     if min(h0, w0) < 8:
         raise ImageError("The image is too small.")
+    if opts.mode == "auto" and not opts.use_pen_colors:
+        from .imagetrace_edges import looks_like_photo
+        if looks_like_photo(cv2, rgb):
+            opts = replace(opts, mode="photo")
     detail = min(max(int(opts.detail), 0), 100)
     side = 500 + detail * 10                                  # long side in working pixels: 500..1500
+    if opts.mode == "photo":
+        side = 1200                                           # edges: fixed scale, detail sets how many
     k = side / max(h0, w0)
     if k < 1.0:
         rgb = cv2.resize(rgb, (max(1, round(w0 * k)), max(1, round(h0 * k))), interpolation=cv2.INTER_AREA)
@@ -299,7 +307,12 @@ def trace_image(data: bytes | np.ndarray, cfg: Config, opts: TraceOptions | None
     oy = rect[1] + (rh - h * s) / 2
 
     pens = [_hex_rgb(c.hex) for c in cfg.colors]
-    layers = _layers(rgb, opts, pens)
+    if opts.mode == "photo":
+        from .imagetrace_edges import trace_edges
+        slot = min(max(opts.pen, 0), max(0, len(pens) - 1))
+        layers = [(slot, None)]
+    else:
+        layers = _layers(rgb, opts, pens)
     eps = 0.5 + (100 - detail) / 100 * 1.5                    # path simplification in px
     min_px = 2.0 + (100 - detail) / 100 * 6.0                 # drop specks shorter than this
     warnings: list[str] = []
@@ -311,7 +324,13 @@ def trace_image(data: bytes | np.ndarray, cfg: Config, opts: TraceOptions | None
             sk = skeletonize(cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8)) > 0)
             mode = "lines" if _is_thin(mask, float(sk.sum())) else "outline"
         used_modes.add(mode)
-        if mode == "lines":
+        if mode == "photo":
+            paths = trace_edges(cv2, rgb, detail, lambda p, e: _simplify(cv2, p, e))
+            if opts.shade:
+                from .imagetrace_edges import shade_dark
+                wmm = opts.pen_widths_mm[slot] if slot < len(opts.pen_widths_mm) else 2.0
+                paths += shade_dark(cv2, rgb, max(2.0, max(3.0, 3 * wmm) / s))
+        elif mode == "lines":
             paths = _trace_lines(cv2, skeletonize, mask, eps, min_px)
         elif mode == "outline":
             paths = _trace_outline(cv2, mask, eps, min_px)

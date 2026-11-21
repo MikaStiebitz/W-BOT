@@ -51,13 +51,14 @@ class JobManager:
         return {"drawing": d.to_json()}
 
     def import_image(self, data: bytes, name: str, options: dict | None = None) -> dict:
-        """Trace a raster image into pen paths. Options: mode, detail, invert, use_pen_colors, pen, threshold."""
+        """Trace a raster image into pen paths. Options: mode, detail, invert, use_pen_colors, shade, pen, threshold."""
         from .imagetrace import ImageError, TraceOptions, trace_image
         from .machine import MachineError
         o = options or {}
         try:
             t = TraceOptions(mode=str(o.get("mode", "auto")), detail=int(o.get("detail", 50)),
                              invert=bool(o.get("invert", False)), use_pen_colors=bool(o.get("use_pen_colors", False)),
+                             shade=bool(o.get("shade", False)),
                              pen=int(o.get("pen", 0)), threshold=None if o.get("threshold") is None else int(o["threshold"]),
                              pen_widths_mm=[c.width_mm for c in self.m.cfg.colors])
             res = trace_image(data, self.m.cfg, t)
