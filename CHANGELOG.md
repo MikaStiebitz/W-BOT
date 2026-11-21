@@ -11,6 +11,10 @@ Hardware versions live in their own folder (`v1.0/`, `v1.1/`, …). Software cha
 - One-click setup: camera, whiteboard, motors and gondola position (camera finds where the belts meet); measured motors are applied after confirmation, the drawing area follows them
 - Camera: board and motor detection, movement and object guard, gondola finder, quieter errors
 - Live draw: draw on the board view and the plotter follows (queued strokes, speed slider, Stop)
+- Photo style for image import (edge-based outlines for photos and renders)
+- The drawing (image, trace options, size and position, live strokes) survives a page reload
+- Time estimate that learns from finished drawings and a better remaining-time display while drawing
+- Whiteboard quiz over MCP and a check against writing already on the board (camera)
 - New slider look; tests run against the built-in defaults instead of the local `config/wbot.yaml`
 
 ## v1.0 — 2026-11-20
